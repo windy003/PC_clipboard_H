@@ -32,7 +32,7 @@ class HotkeyThread(QThread):
             print(f"热键注册错误: {e}")  # 调试信息
 
     def on_hotkey(self):
-        print("热键被触��")  # 调试信息
+        print("热键被触发")  # 调试信息
         self.triggered.emit()
 
     def stop(self):
@@ -221,7 +221,7 @@ class ClipboardHistoryApp(QMainWindow):
         current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
         current_item = current_list.currentItem()
         if current_item:
-            # ��用原始文本而不是截断的文本
+            # 使用原始文本而不是截断的文本
             original_text = (self.clipboard_history if self.stacked_widget.currentIndex() == 0 
                             else self.favorites)[current_list.currentRow()]
             self.clipboard.setText(original_text)
@@ -325,7 +325,7 @@ class ClipboardHistoryApp(QMainWindow):
         elif event.key() == Qt.Key.Key_Escape:
             self.hide()
         elif event.key() == Qt.Key.Key_Right and self.stacked_widget.currentIndex() == 0:
-            # 切换到收藏面板
+            # 切换��收藏面板
             self.stacked_widget.setCurrentIndex(1)
             self.panel_label.setText("收藏夹")
             self.favorites_list.setFocus()
@@ -337,9 +337,37 @@ class ClipboardHistoryApp(QMainWindow):
         elif event.key() == Qt.Key.Key_Delete and self.stacked_widget.currentIndex() == 1:
             # 在收藏面板中删除选中项
             self.delete_favorite()
+        elif (event.modifiers() == Qt.KeyboardModifier.AltModifier and 
+              self.stacked_widget.currentIndex() == 1):  # 仅在收藏面板中生效
+            if event.key() == Qt.Key.Key_Up:
+                self.move_favorite_item(-1)  # 向上移动
+            elif event.key() == Qt.Key.Key_Down:
+                self.move_favorite_item(1)   # 向下移动
         else:
             # 保持其他按键的默认行为
             QListWidget.keyPressEvent(self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list, event)
+
+    def move_favorite_item(self, direction):
+        """移动收藏条目
+        direction: -1 向上移动, 1 向下移动
+        """
+        current_row = self.favorites_list.currentRow()
+        if current_row < 0:  # 没有选中项
+            return
+        
+        new_row = current_row + direction
+        if 0 <= new_row < self.favorites_list.count():  # 确保新位置有效
+            # 从列表控件中移除并重新插入
+            item = self.favorites_list.takeItem(current_row)
+            self.favorites_list.insertItem(new_row, item)
+            self.favorites_list.setCurrentRow(new_row)  # 保持选中状态
+            
+            # 更新数据列表
+            item = self.favorites.pop(current_row)
+            self.favorites.insert(new_row, item)
+            
+            # 保存更改
+            self.save_favorites()
 
     def delete_favorite(self):
         """删除选中的收藏条目"""
@@ -353,7 +381,7 @@ class ClipboardHistoryApp(QMainWindow):
             self.save_favorites()
 
     def paste_selected(self):
-        """复制选���项并模拟粘贴操作"""
+        """复制选中项并模拟粘贴操作"""
         current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
         current_item = current_list.currentItem()
         if current_item:
@@ -423,12 +451,12 @@ class ClipboardHistoryApp(QMainWindow):
         if current_item:
             # 获取原始文本而不是截断的文本
             original_text = self.clipboard_history[self.history_list.currentRow()]
-            print(f"当前选中��: {original_text}")  # 调试信息
+            print(f"当前选中: {original_text}")  # 调试信息
             add_to_favorites = menu.addAction("添加到收藏")
             action = menu.exec(self.history_list.mapToGlobal(position))
             
             if action == add_to_favorites:
-                print("选择了��加到收藏选项")  # 调试信息
+                print("选择了加到收藏选项")  # 调试信息
                 self.add_to_favorites(original_text)
 
     def add_to_favorites(self, text):
