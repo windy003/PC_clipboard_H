@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidget, 
                            QVBoxLayout, QPushButton, QWidget, QSystemTrayIcon, QMenu,
-                           QHBoxLayout, QStackedWidget, QLabel, QTextEdit)
+                           QHBoxLayout, QStackedWidget, QLabel, QTextEdit, QDialog, QLineEdit, QMessageBox)
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QClipboard, QIcon, QKeyEvent
 import sys
@@ -12,33 +12,106 @@ import keyboard
 class HotkeyThread(QThread):
     triggered = pyqtSignal()
 
-    def __init__(self):
+    def __init__(self, hotkey='ctrl+alt+z'):
         super().__init__()
         self.running = True
+        self.hotkey = hotkey
 
     def run(self):
         try:
-            # 确保之前的热键被清除
             keyboard.unhook_all()
-            # 直接使用 keyboard.wait 方式
-            keyboard.add_hotkey('ctrl+alt+z', self.on_hotkey, suppress=True)
-            print("热键已注册: Ctrl+Alt+Z")  # 调试信息
+            keyboard.add_hotkey(self.hotkey, self.on_hotkey, suppress=True)
+            print(f"热键已注册: {self.hotkey}")
             
-            # 保持线程运行
             while self.running:
                 self.msleep(100)
                 
         except Exception as e:
-            print(f"热键注册错误: {e}")  # 调试信息
+            print(f"热键注册错误: {e}")
 
     def on_hotkey(self):
-        print("热键被触发")  # 调试信息
+        print("热键被触发")
         self.triggered.emit()
 
     def stop(self):
         self.running = False
         keyboard.unhook_all()
-        print("热键已清理")  # 调试信息
+        print("热键已清理")
+
+class HotkeySettingDialog(QDialog):
+    """热键设置对话框"""
+    def __init__(self, parent=None, current_hotkey="ctrl+alt+z"):
+        super().__init__(parent)
+        self.setWindowTitle("设置快捷键")
+        self.setFixedSize(300, 150)
+        
+        layout = QVBoxLayout(self)
+        
+        # 更新说明标签，添加 Win 键说明
+        label = QLabel("请按下新的快捷键组合\n(支持: Ctrl, Alt, Shift, Win + 字母/数字)")
+        layout.addWidget(label)
+        
+        # 显示当前热键
+        self.hotkey_display = QLineEdit(current_hotkey)
+        self.hotkey_display.setReadOnly(True)
+        layout.addWidget(self.hotkey_display)
+        
+        # 确认按钮
+        self.confirm_button = QPushButton("确认")
+        self.confirm_button.clicked.connect(self.accept)
+        layout.addWidget(self.confirm_button)
+        
+        self.new_hotkey = current_hotkey
+        self.listening = False
+        self.keys_pressed = set()
+        
+        # 开始监听按键
+        self.hotkey_display.focusInEvent = self.start_listening
+        self.hotkey_display.focusOutEvent = self.stop_listening
+        
+    def start_listening(self, event):
+        """开始监听按键"""
+        self.listening = True
+        self.keys_pressed.clear()
+        keyboard.hook(self.on_key_event)
+        
+    def stop_listening(self, event):
+        """停止监听按键"""
+        self.listening = False
+        keyboard.unhook_all()
+        
+    def on_key_event(self, event):
+        """处理按键事件"""
+        if not self.listening or not event.event_type == keyboard.KEY_DOWN:
+            return
+            
+        key_name = event.name.lower()
+        
+        # 特殊键映射，添加 Win 键的映射
+        key_mapping = {
+            'left ctrl': 'ctrl',
+            'right ctrl': 'ctrl',
+            'left alt': 'alt',
+            'right alt': 'alt',
+            'left shift': 'shift',
+            'right shift': 'shift',
+            'left windows': 'win',
+            'right windows': 'win',
+            'windows': 'win'
+        }
+        
+        key_name = key_mapping.get(key_name, key_name)
+        
+        # 更新按下的键，添加 win 到修饰键列表
+        if key_name in ['ctrl', 'alt', 'shift', 'win']:
+            self.keys_pressed.add(key_name)
+        else:
+            # 组合键
+            hotkey_parts = list(self.keys_pressed) + [key_name]
+            self.new_hotkey = '+'.join(sorted(hotkey_parts))
+            self.hotkey_display.setText(self.new_hotkey)
+            self.listening = False
+            keyboard.unhook_all()
 
 class PreviewWindow(QWidget):
     """悬浮预览窗口"""
@@ -159,7 +232,16 @@ class ClipboardHistoryApp(QMainWindow):
         # 加载历史记录
         self.load_history()
         
-        # 创建系统托盘图标
+        # 加载配置
+        self.config_file = os.path.join(os.path.expanduser('~'), '.clipboard_config.json')
+        self.load_config()
+        
+        # 创建并启动热键线程
+        self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+alt+z'))
+        self.hotkey_thread.triggered.connect(self.show_window)
+        self.hotkey_thread.start()
+        
+        # 创建系统托盘图标 (只调用一次)
         self.create_tray_icon()
         
         # 设置窗口标志，移除关闭按钮
@@ -176,11 +258,6 @@ class ClipboardHistoryApp(QMainWindow):
         
         # 双击列表项也触发粘贴
         self.history_list.itemDoubleClicked.connect(self.paste_selected)
-        
-        # 创建并启动热键线程
-        self.hotkey_thread = HotkeyThread()
-        self.hotkey_thread.triggered.connect(self.show_window)
-        self.hotkey_thread.start()
         
         # 为列表控件添加 ESC 键支持
         self.history_list.keyPressEvent = self.list_key_press
@@ -259,7 +336,7 @@ class ClipboardHistoryApp(QMainWindow):
         """创建系统托盘图标"""
         self.tray_icon = QSystemTrayIcon(self)
         
-        # 使用资源路径获取图标
+        # 使用资���路径获取图标
         icon_path = get_resource_path("icon.ico")
         if os.path.exists(icon_path):
             self.tray_icon.setIcon(QIcon(icon_path))
@@ -284,6 +361,10 @@ class ClipboardHistoryApp(QMainWindow):
         quit_action = tray_menu.addAction("退出")
         quit_action.triggered.connect(QApplication.quit)
         
+        # 添加设置选项
+        settings_action = tray_menu.addAction("设置")
+        settings_action.triggered.connect(self.show_settings)
+        
         # 设置托盘菜单
         self.tray_icon.setContextMenu(tray_menu)
         
@@ -294,7 +375,7 @@ class ClipboardHistoryApp(QMainWindow):
         self.tray_icon.activated.connect(self.tray_icon_activated)
 
     def create_default_icon(self):
-        """创建一个简单的默认图标"""
+        """创��一个简单的默认图标"""
         from PyQt6.QtGui import QPixmap, QPainter, QColor
         pixmap = QPixmap(32, 32)
         pixmap.fill(Qt.GlobalColor.transparent)
@@ -325,7 +406,7 @@ class ClipboardHistoryApp(QMainWindow):
         elif event.key() == Qt.Key.Key_Escape:
             self.hide()
         elif event.key() == Qt.Key.Key_Right and self.stacked_widget.currentIndex() == 0:
-            # 切换��收藏面板
+            # 切换到收藏面板
             self.stacked_widget.setCurrentIndex(1)
             self.panel_label.setText("收藏夹")
             self.favorites_list.setFocus()
@@ -566,6 +647,42 @@ class ClipboardHistoryApp(QMainWindow):
         self.favorites.insert(new_position, moved_item)
         # 保存更新后的收藏列表
         self.save_favorites()
+
+    def show_settings(self):
+        """显示设置对话框"""
+        dialog = HotkeySettingDialog(self, self.config.get('hotkey', 'ctrl+alt+z'))
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_hotkey = dialog.new_hotkey
+            if new_hotkey != self.config.get('hotkey'):
+                self.config['hotkey'] = new_hotkey
+                self.save_config()
+                # 重启热键线程
+                self.hotkey_thread.stop()
+                self.hotkey_thread.wait()
+                self.hotkey_thread = HotkeyThread(new_hotkey)
+                self.hotkey_thread.triggered.connect(self.show_window)
+                self.hotkey_thread.start()
+                QMessageBox.information(self, "设置成功", f"快捷键已更改为: {new_hotkey}")
+
+    def load_config(self):
+        """加载配置"""
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r', encoding='utf-8') as f:
+                    self.config = json.load(f)
+            else:
+                self.config = {'hotkey': 'ctrl+alt+z'}
+        except Exception as e:
+            print(f"加载配置出错: {e}")
+            self.config = {'hotkey': 'ctrl+alt+z'}
+
+    def save_config(self):
+        """保存配置"""
+        try:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(self.config, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"保存配置出错: {e}")
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径"""
