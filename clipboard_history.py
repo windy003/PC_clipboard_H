@@ -51,9 +51,20 @@ class ClipboardHistoryApp(QMainWindow):
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
         
+        # 创建顶部标签布局
+        top_layout = QHBoxLayout()
+        layout.insertLayout(0, top_layout)  # 将顶部布局添加到主布局的最上方
+        
         # 添加标题栏显示当前面板
         self.panel_label = QLabel("历史记录")
-        layout.addWidget(self.panel_label)
+        top_layout.addWidget(self.panel_label)
+        
+        # 添加提示文字
+        hint_label = QLabel("(按左右方向键以切换历史和收藏面板)")
+        hint_label.setStyleSheet("color: gray;")  # 使提示文字颜色变淡
+        top_layout.addWidget(hint_label)
+        
+        top_layout.addStretch()  # 添加弹性空间，使标签靠左对齐
         
         # 创建堆叠式窗口部件
         self.stacked_widget = QStackedWidget()
@@ -106,7 +117,7 @@ class ClipboardHistoryApp(QMainWindow):
         
         self.last_text = self.clipboard.text()
         
-        # 设置保存文���的路径
+        # 设置保存文件的路径
         self.history_file = os.path.join(os.path.expanduser('~'), '.clipboard_history.json')
         
         # 加载历史记录
@@ -179,7 +190,7 @@ class ClipboardHistoryApp(QMainWindow):
             self.clipboard_history = []
 
     def save_history(self):
-        """保存历史���录到文件"""
+        """保存历史记录到文件"""
         try:
             with open(self.history_file, 'w', encoding='utf-8') as f:
                 json.dump(self.clipboard_history, f, ensure_ascii=False, indent=2)
