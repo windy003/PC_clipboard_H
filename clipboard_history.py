@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidget, 
                            QVBoxLayout, QPushButton, QWidget, QSystemTrayIcon, QMenu,
-                           QHBoxLayout, QStackedWidget, QLabel)
+                           QHBoxLayout, QStackedWidget, QLabel, QTextEdit)
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QClipboard, QIcon, QKeyEvent
 import sys
@@ -40,11 +40,42 @@ class HotkeyThread(QThread):
         keyboard.unhook_all()
         print("热键已清理")  # 调试信息
 
+class PreviewWindow(QWidget):
+    """悬浮预览窗口"""
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
+        self.setStyleSheet("""
+            QWidget {
+                background-color: #f0f0f0;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+            }
+            QTextEdit {
+                border: none;
+                background-color: transparent;
+            }
+        """)
+        
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+        
+        self.text_edit = QTextEdit()
+        self.text_edit.setReadOnly(True)
+        layout.addWidget(self.text_edit)
+        
+        self.setMinimumSize(300, 200)
+        self.setMaximumSize(400, 300)
+
 class ClipboardHistoryApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("剪贴板历史")
         self.setGeometry(100, 100, 400, 300)
+        
+        # 设置窗口图标
+        icon_path = os.path.join(os.path.dirname(__file__), "icon.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
         
         # 创建主窗口部件
         central_widget = QWidget()
@@ -148,6 +179,13 @@ class ClipboardHistoryApp(QMainWindow):
         
         # 为列表控件添加 ESC 键支持
         self.history_list.keyPressEvent = self.list_key_press
+        
+        # 创建预览窗口
+        self.preview_window = PreviewWindow()
+        
+        # 为两个列表添加选择变化事件
+        self.history_list.currentItemChanged.connect(self.show_preview)
+        self.favorites_list.currentItemChanged.connect(self.show_preview)
 
     def check_clipboard(self):
         current_text = self.clipboard.text()
@@ -188,9 +226,10 @@ class ClipboardHistoryApp(QMainWindow):
                 with open(self.history_file, 'r', encoding='utf-8') as f:
                     self.clipboard_history = json.load(f)
                     # 将历史记录显示到列表中，使用截断的文本
+                    self.history_list.clear()  # 清空列表
                     for text in self.clipboard_history:
                         truncated_text = self.truncate_text(text)
-                        self.history_list.insertItem(0, truncated_text)
+                        self.history_list.addItem(truncated_text)  # 使用 addItem 而不是 insertItem
         except Exception as e:
             print(f"加载历史记录时出错: {e}")
             self.clipboard_history = []
@@ -204,7 +243,7 @@ class ClipboardHistoryApp(QMainWindow):
             print(f"保存历史记录时出错: {e}")
 
     def create_tray_icon(self):
-        """创建系统���盘图标"""
+        """创建系统托盘图标"""
         self.tray_icon = QSystemTrayIcon(self)
         
         # 使用项目目录下的图标文件
@@ -262,15 +301,9 @@ class ClipboardHistoryApp(QMainWindow):
                 self.hide()
 
     def closeEvent(self, event):
-        """重写关闭事件，阻止窗口关闭"""
-        event.ignore()
-        self.hide()
-        self.tray_icon.showMessage(
-            "剪贴板历史",
-            "按下 Ctrl+Alt+Z 可以重新打开窗口",
-            QSystemTrayIcon.MessageIcon.Information,
-            2000
-        )
+        """重写关闭事件，确保预览窗口也被关闭"""
+        self.preview_window.close()
+        super().closeEvent(event)
 
     def list_key_press(self, event: QKeyEvent):
         """处理列表的按键事件"""
@@ -375,22 +408,29 @@ class ClipboardHistoryApp(QMainWindow):
         current_item = self.history_list.currentItem()
         
         if current_item:
-            print(f"当前选中项: {current_item.text()}")  # 调试信息
+            # 获取原始文本而不是截断的文本
+            original_text = self.clipboard_history[self.history_list.currentRow()]
+            print(f"当前选中项: {original_text}")  # 调试信息
             add_to_favorites = menu.addAction("添加到收藏")
             action = menu.exec(self.history_list.mapToGlobal(position))
             
             if action == add_to_favorites:
                 print("选择了添加到收藏选项")  # 调试信息
-                self.add_to_favorites(current_item.text())
+                self.add_to_favorites(original_text)
 
     def add_to_favorites(self, text):
         """添加文本到收藏夹"""
+        print(f"尝试添加到收藏: {text}")  # 调试信息
         if text not in self.favorites:
+            print("添加新收藏项")  # 调试信息
+            # 在列表开头插入新项目
             self.favorites.insert(0, text)
-            # 显示截断后的文本
+            # 在收藏列表控件的顶部插入截断的文本
             truncated_text = self.truncate_text(text)
             self.favorites_list.insertItem(0, truncated_text)
             self.save_favorites()
+        else:
+            print("该项目已在收藏中")  # 调试信息
 
     def load_favorites(self):
         """从文件加载收藏记录"""
@@ -398,10 +438,11 @@ class ClipboardHistoryApp(QMainWindow):
             if os.path.exists(self.favorites_file):
                 with open(self.favorites_file, 'r', encoding='utf-8') as f:
                     self.favorites = json.load(f)
-                    # 从后向前添加，保持最新的在最上面，使用截断的文本
-                    for text in reversed(self.favorites):
+                    # 清空列表并重新加载
+                    self.favorites_list.clear()
+                    for text in self.favorites:
                         truncated_text = self.truncate_text(text)
-                        self.favorites_list.insertItem(0, truncated_text)
+                        self.favorites_list.addItem(truncated_text)  # 使用 addItem
         except Exception as e:
             print(f"加载收藏记录时出错: {e}")
             self.favorites = []
@@ -420,6 +461,60 @@ class ClipboardHistoryApp(QMainWindow):
         if len(text) > max_length:
             return text[:max_length] + "..."
         return text
+
+    def show_preview(self, current, previous):
+        """显示选中条目的完整内容"""
+        if not current:
+            self.preview_window.hide()
+            return
+        
+        # 获取原始文本
+        current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
+        current_row = current_list.currentRow()
+        data_list = self.clipboard_history if self.stacked_widget.currentIndex() == 0 else self.favorites
+        
+        print(f"当前行号: {current_row}")  # 调试信息
+        print(f"当前面板: {'历史记录' if self.stacked_widget.currentIndex() == 0 else '收藏夹'}")  # 调试信息
+        print(f"列表项文本: {current.text()}")  # 调试信息
+        
+        if 0 <= current_row < len(data_list):
+            original_text = data_list[current_row]
+            print(f"原始文本: {original_text}")  # 调试信息
+            
+            # 如果文本长度超过截断长度，才显示预览窗口
+            if len(original_text) > 50:  # 根据 truncate_text 的 max_length 参数调整
+                self.preview_window.text_edit.setText(original_text)
+                
+                # 计算预览窗口位置
+                list_widget = current_list
+                item_rect = list_widget.visualItemRect(current)
+                global_pos = list_widget.mapToGlobal(item_rect.topRight())
+                
+                # 调整位置，确保预览窗口在屏幕内
+                screen = QApplication.primaryScreen().geometry()
+                preview_x = global_pos.x() + 10  # 在列表右侧显示，留出10像素间距
+                preview_y = global_pos.y()
+                
+                # 如果预览窗口超出屏幕右边界，则显示在列表左侧
+                if preview_x + self.preview_window.width() > screen.right():
+                    preview_x = global_pos.x() - self.preview_window.width() - 10
+                
+                # 如果预览窗口超出屏幕底部，则向上调整位置
+                if preview_y + self.preview_window.height() > screen.bottom():
+                    preview_y = screen.bottom() - self.preview_window.height()
+                
+                self.preview_window.move(preview_x, preview_y)
+                self.preview_window.show()
+            else:
+                self.preview_window.hide()
+        else:
+            print(f"索引越界: {current_row} >= {len(data_list)}")  # 调试信息
+            self.preview_window.hide()
+
+    def hide(self):
+        """重写hide方法，同时隐藏预览窗口"""
+        super().hide()
+        self.preview_window.hide()
 
 def main():
     app = QApplication(sys.argv)
