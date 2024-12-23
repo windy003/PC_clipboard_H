@@ -16,12 +16,12 @@ class HotkeyThread(QThread):
         super().__init__()
         self.running = True
         self.hotkey = hotkey
-        self.keys_pressed = set()
+        self.current_hotkey = None
         
     def run(self):
         try:
-            # 使用 keyboard 库只注册热键组合
-            keyboard.add_hotkey(self.hotkey, self.on_hotkey)
+            # 使用 keyboard 库注册热键组合
+            self.current_hotkey = keyboard.add_hotkey(self.hotkey, self.on_hotkey)
             print(f"热键已注册: {self.hotkey}")
             
             while self.running:
@@ -36,8 +36,12 @@ class HotkeyThread(QThread):
 
     def stop(self):
         self.running = False
-        keyboard.remove_hotkey(self.hotkey)  # 只移除特定的热键
-        print("热键已清理")
+        try:
+            if self.current_hotkey:
+                keyboard.remove_hotkey(self.current_hotkey)
+            print("热键已清理")
+        except Exception as e:
+            print(f"清理热键时出错: {e}")
 
 class HotkeySettingDialog(QDialog):
     """热键设置对话框"""
@@ -48,7 +52,7 @@ class HotkeySettingDialog(QDialog):
         
         layout = QVBoxLayout(self)
         
-        # 更新说明标签，添加 Win 键说明
+        # 更新说明标签
         label = QLabel("请按下新的快捷键组合\n(支持: Ctrl, Alt, Shift, Win + 字母/数字)")
         layout.addWidget(label)
         
@@ -63,68 +67,62 @@ class HotkeySettingDialog(QDialog):
         layout.addWidget(self.confirm_button)
         
         self.new_hotkey = current_hotkey
-        self.listening = False
-        self.keys_pressed = set()
+        self.key_combination = set()
         
-        # 开始监听按键
-        self.hotkey_display.focusInEvent = self.start_listening
-        self.hotkey_display.focusOutEvent = self.stop_listening
-        
-    def start_listening(self, event):
-        """开始监听按键"""
-        self.listening = True
-        self.keys_pressed.clear()
-        # 只监听这个对话框的按键事件，不使用全局hook
-        self.installEventFilter(self)
-        
-    def stop_listening(self, event):
-        """停止监听按键"""
-        self.listening = False
-        self.removeEventFilter(self)
-        
-    def eventFilter(self, obj, event):
+    def keyPressEvent(self, event):
         """处理按键事件"""
-        if event.type() == event.Type.KeyPress and self.listening:
-            key_event = event
-            key_text = key_event.text().lower()
-            
-            # 特殊键映射
-            special_keys = {
-                Qt.Key.Key_Control: 'ctrl',
-                Qt.Key.Key_Alt: 'alt',
-                Qt.Key.Key_Shift: 'shift',
-                Qt.Key.Key_Meta: 'win'  # Meta 键就是 Windows 键
-            }
-            
-            # 检查修饰键
-            modifiers = key_event.modifiers()
-            pressed_keys = set()
-            
-            if modifiers & Qt.KeyboardModifier.ControlModifier:
-                pressed_keys.add('ctrl')
-            if modifiers & Qt.KeyboardModifier.AltModifier:
-                pressed_keys.add('alt')
-            if modifiers & Qt.KeyboardModifier.ShiftModifier:
-                pressed_keys.add('shift')
-            if modifiers & Qt.KeyboardModifier.MetaModifier:
-                pressed_keys.add('win')
-                
-            # 如果按下的是修饰键本身
-            if key_event.key() in special_keys:
-                key_name = special_keys[key_event.key()]
-                if key_name not in pressed_keys:
-                    pressed_keys.add(key_name)
-            elif key_text:  # 如果是普通键
-                # 组合键
-                hotkey_parts = list(pressed_keys) + [key_text]
-                self.new_hotkey = '+'.join(sorted(hotkey_parts))
-                self.hotkey_display.setText(self.new_hotkey)
-                self.listening = False
-                
-            return True
-        return super().eventFilter(obj, event)
+        # 特殊键映射
+        special_keys = {
+            Qt.Key.Key_Control: 'ctrl',
+            Qt.Key.Key_Alt: 'alt',
+            Qt.Key.Key_Shift: 'shift',
+            Qt.Key.Key_Meta: 'win',
+        }
         
-    # 移除 on_key_event 方法，因为我们不再使用 keyboard 库的 hook
+        # 获取按键
+        key = event.key()
+        
+        # 收集修饰键
+        modifiers = event.modifiers()
+        current_keys = set()
+        
+        # 添加修饰键
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            current_keys.add('ctrl')
+        if modifiers & Qt.KeyboardModifier.AltModifier:
+            current_keys.add('alt')
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            current_keys.add('shift')
+        if modifiers & Qt.KeyboardModifier.MetaModifier:
+            current_keys.add('win')
+        
+        # 处理特殊键
+        if key in special_keys:
+            key_name = special_keys[key]
+            if key_name not in current_keys:
+                current_keys.add(key_name)
+        # 处理字母和数字键
+        elif Qt.Key.Key_A <= key <= Qt.Key.Key_Z:
+            # 将 Key 值转换为小写字母
+            key_char = chr(key).lower()
+            current_keys.add(key_char)
+        elif Qt.Key.Key_0 <= key <= Qt.Key.Key_9:
+            # 将 Key 值转换为数字字符
+            key_char = chr(key - Qt.Key.Key_0 + ord('0'))
+            current_keys.add(key_char)
+            
+        # 更新显示
+        if current_keys:
+            self.key_combination = current_keys
+            self.new_hotkey = '+'.join(sorted(current_keys))
+            self.hotkey_display.setText(self.new_hotkey)
+            
+    def keyReleaseEvent(self, event):
+        """处理按键释放事件"""
+        if not event.modifiers():
+            if self.key_combination:
+                self.new_hotkey = '+'.join(sorted(self.key_combination))
+                self.hotkey_display.setText(self.new_hotkey)
 
 class PreviewWindow(QWidget):
     """悬浮预览窗口"""
@@ -254,7 +252,7 @@ class ClipboardHistoryApp(QMainWindow):
         self.hotkey_thread.triggered.connect(self.show_window)
         self.hotkey_thread.start()
         
-        # 创建系统托盘图标 (只调用一次)
+        # ���建系统托盘图标 (只调用一次)
         self.create_tray_icon()
         
         # 设置窗口标志，移除关闭按钮
