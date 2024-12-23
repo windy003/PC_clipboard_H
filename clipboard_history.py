@@ -70,7 +70,7 @@ class ClipboardHistoryApp(QMainWindow):
         self.stacked_widget = QStackedWidget()
         layout.addWidget(self.stacked_widget)
         
-        # ��建历史记录列表
+        # 创建历史记录列表
         self.history_list = QListWidget()
         self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.history_list.customContextMenuRequested.connect(self.show_history_context_menu)
@@ -204,7 +204,7 @@ class ClipboardHistoryApp(QMainWindow):
             print(f"保存历史记录时出错: {e}")
 
     def create_tray_icon(self):
-        """创建系统托盘图标"""
+        """创建系统���盘图标"""
         self.tray_icon = QSystemTrayIcon(self)
         
         # 使用项目目录下的图标文件
@@ -288,9 +288,23 @@ class ClipboardHistoryApp(QMainWindow):
             self.stacked_widget.setCurrentIndex(0)
             self.panel_label.setText("历史记录")
             self.history_list.setFocus()
+        elif event.key() == Qt.Key.Key_Delete and self.stacked_widget.currentIndex() == 1:
+            # 在收藏面板中删除选中项
+            self.delete_favorite()
         else:
             # 保持其他按键的默认行为
             QListWidget.keyPressEvent(self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list, event)
+
+    def delete_favorite(self):
+        """删除选中的收藏条目"""
+        current_row = self.favorites_list.currentRow()
+        if current_row >= 0:
+            # 从列表控件中移除
+            self.favorites_list.takeItem(current_row)
+            # 从数据列表中移除
+            self.favorites.pop(current_row)
+            # 保存更改
+            self.save_favorites()
 
     def paste_selected(self):
         """复制选中项并模拟粘贴操作"""
