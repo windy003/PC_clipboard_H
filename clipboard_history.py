@@ -182,7 +182,7 @@ class ClipboardHistoryApp(QMainWindow):
         
         top_layout.addStretch()  # 添加弹性空间，使标签靠左对齐
         
-        # 创建堆叠式窗口部件
+        # 创建堆叠式���口部件
         self.stacked_widget = QStackedWidget()
         layout.addWidget(self.stacked_widget)
         
@@ -252,7 +252,7 @@ class ClipboardHistoryApp(QMainWindow):
         self.hotkey_thread.triggered.connect(self.show_window)
         self.hotkey_thread.start()
         
-        # ���建系统托盘图标 (只调用一次)
+        # 创建系统托盘图标 (只调用一次)
         self.create_tray_icon()
         
         # 设置窗口标志，移除关闭按钮
@@ -287,6 +287,20 @@ class ClipboardHistoryApp(QMainWindow):
         # 设置固定行高
         self.history_list.setStyleSheet("QListWidget::item { height: 25px; }")
         self.favorites_list.setStyleSheet("QListWidget::item { height: 25px; }")
+        
+        # 修改列表项的显示格式
+        self.history_list.setStyleSheet("""
+            QListWidget::item { 
+                height: 25px;
+                padding-left: 5px;
+            }
+        """)
+        self.favorites_list.setStyleSheet("""
+            QListWidget::item { 
+                height: 25px;
+                padding-left: 5px;
+            }
+        """)
 
     def check_clipboard(self):
         current_text = self.clipboard.text()
@@ -301,7 +315,9 @@ class ClipboardHistoryApp(QMainWindow):
             # 显示截断后的文本
             truncated_text = self.truncate_text(text)
             self.history_list.insertItem(0, truncated_text)
-            # 每次更新后保存历史记录
+            # 更新编号
+            self.update_list_numbers(self.history_list)
+            # 保存历史记录
             self.save_history()
 
     def copy_selected(self):
@@ -326,11 +342,12 @@ class ClipboardHistoryApp(QMainWindow):
             if os.path.exists(self.history_file):
                 with open(self.history_file, 'r', encoding='utf-8') as f:
                     self.clipboard_history = json.load(f)
-                    # 将历史记录显示到列表中，使用截断的文本
-                    self.history_list.clear()  # 清空列表
+                    self.history_list.clear()
                     for text in self.clipboard_history:
                         truncated_text = self.truncate_text(text)
-                        self.history_list.addItem(truncated_text)  # 使用 addItem 而不是 insertItem
+                        self.history_list.addItem(truncated_text)
+                    # 更新编号
+                    self.update_list_numbers(self.history_list)
         except Exception as e:
             print(f"加载历史记录时出错: {e}")
             self.clipboard_history = []
@@ -417,59 +434,59 @@ class ClipboardHistoryApp(QMainWindow):
         elif event.key() == Qt.Key.Key_Escape:
             self.hide()
         elif event.key() == Qt.Key.Key_Right and self.stacked_widget.currentIndex() == 0:
-            # 切换到收藏面板
             self.stacked_widget.setCurrentIndex(1)
             self.panel_label.setText("收藏夹")
             self.favorites_list.setFocus()
         elif event.key() == Qt.Key.Key_Left and self.stacked_widget.currentIndex() == 1:
-            # 切换到历史记录面板
             self.stacked_widget.setCurrentIndex(0)
             self.panel_label.setText("历史记录")
             self.history_list.setFocus()
         elif event.key() == Qt.Key.Key_Delete and self.stacked_widget.currentIndex() == 1:
-            # 在收藏面板中删除选中项
             self.delete_favorite()
         elif (event.modifiers() == Qt.KeyboardModifier.AltModifier and 
-              self.stacked_widget.currentIndex() == 1):  # 仅在收藏面板中生效
+              self.stacked_widget.currentIndex() == 1):
             if event.key() == Qt.Key.Key_Up:
-                self.move_favorite_item(-1)  # 向上移动
+                self.move_favorite_item(-1)
             elif event.key() == Qt.Key.Key_Down:
-                self.move_favorite_item(1)   # 向下移动
+                self.move_favorite_item(1)
+        # 处理数字键 1-9
+        elif Qt.Key.Key_1 <= event.key() <= Qt.Key.Key_9:
+            index = event.key() - Qt.Key.Key_1  # 将键值转换为0-8的索引
+            current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
+            if index < current_list.count():
+                current_list.setCurrentRow(index)
+                self.paste_selected()
         else:
             # 保持其他按键的默认行为
             QListWidget.keyPressEvent(self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list, event)
 
     def move_favorite_item(self, direction):
-        """移动收藏条目
-        direction: -1 向上移动, 1 向下移动
-        """
+        """移动收藏条目"""
         current_row = self.favorites_list.currentRow()
-        if current_row < 0:  # 没有选中项
+        if current_row < 0:
             return
         
         new_row = current_row + direction
-        if 0 <= new_row < self.favorites_list.count():  # 确保新位置有效
-            # 从列表控件中移除并重新插入
+        if 0 <= new_row < self.favorites_list.count():
             item = self.favorites_list.takeItem(current_row)
             self.favorites_list.insertItem(new_row, item)
-            self.favorites_list.setCurrentRow(new_row)  # 保持选中状态
+            self.favorites_list.setCurrentRow(new_row)
             
-            # 更新数据列表
             item = self.favorites.pop(current_row)
             self.favorites.insert(new_row, item)
             
-            # 保存更改
+            # 更新编号
+            self.update_list_numbers(self.favorites_list)
             self.save_favorites()
 
     def delete_favorite(self):
         """删除选中的收藏条目"""
         current_row = self.favorites_list.currentRow()
         if current_row >= 0:
-            # 从列表控件中移除
             self.favorites_list.takeItem(current_row)
-            # 从数据列表中移除
             self.favorites.pop(current_row)
-            # 保存更改
+            # 更新编号
+            self.update_list_numbers(self.favorites_list)
             self.save_favorites()
 
     def paste_selected(self):
@@ -553,17 +570,13 @@ class ClipboardHistoryApp(QMainWindow):
 
     def add_to_favorites(self, text):
         """添加文本到收藏夹"""
-        print(f"尝试添加到收藏: {text}")  # 调试信息
         if text not in self.favorites:
-            print("添加新收藏项")  # 调试信息
-            # 在列表开头插入新项目
             self.favorites.insert(0, text)
-            # 在收藏列表控件的顶部插入截断的文本
             truncated_text = self.truncate_text(text)
             self.favorites_list.insertItem(0, truncated_text)
+            # 更新编号
+            self.update_list_numbers(self.favorites_list)
             self.save_favorites()
-        else:
-            print("该项目已在收藏中")  # 调试信息
 
     def load_favorites(self):
         """从文件加载收藏记录"""
@@ -571,11 +584,12 @@ class ClipboardHistoryApp(QMainWindow):
             if os.path.exists(self.favorites_file):
                 with open(self.favorites_file, 'r', encoding='utf-8') as f:
                     self.favorites = json.load(f)
-                    # 清空列表并重新加载
                     self.favorites_list.clear()
                     for text in self.favorites:
                         truncated_text = self.truncate_text(text)
-                        self.favorites_list.addItem(truncated_text)  # 使用 addItem
+                        self.favorites_list.addItem(truncated_text)
+                    # 更新编号
+                    self.update_list_numbers(self.favorites_list)
         except Exception as e:
             print(f"加载收藏记录时出错: {e}")
             self.favorites = []
@@ -694,6 +708,17 @@ class ClipboardHistoryApp(QMainWindow):
                 json.dump(self.config, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"保存配置出错: {e}")
+
+    def update_list_numbers(self, list_widget):
+        """更新列表项的编号"""
+        for i in range(list_widget.count()):
+            item = list_widget.item(i)
+            text = item.text()
+            # 移除可能存在的旧编号
+            if '. ' in text:
+                text = text.split('. ', 1)[1]
+            # 添加新编号
+            item.setText(f"{i+1}. {text}")
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径"""
