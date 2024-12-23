@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidget, 
-                           QVBoxLayout, QPushButton, QWidget, QSystemTrayIcon, QMenu)
+                           QVBoxLayout, QPushButton, QWidget, QSystemTrayIcon, QMenu,
+                           QHBoxLayout, QStackedWidget, QLabel)
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QClipboard, QIcon, QKeyEvent
 import sys
@@ -50,19 +51,46 @@ class ClipboardHistoryApp(QMainWindow):
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
         
-        # 创建列表控件来显示剪贴板历史
+        # 添加标题栏显示当前面板
+        self.panel_label = QLabel("历史记录")
+        layout.addWidget(self.panel_label)
+        
+        # 创建堆叠式窗口部件
+        self.stacked_widget = QStackedWidget()
+        layout.addWidget(self.stacked_widget)
+        
+        # 创建历史记录列表
         self.history_list = QListWidget()
-        layout.addWidget(self.history_list)
+        self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.history_list.customContextMenuRequested.connect(self.show_history_context_menu)
+        self.history_list.keyPressEvent = self.list_key_press
+        self.stacked_widget.addWidget(self.history_list)
+        
+        # 创建收藏列表
+        self.favorites_list = QListWidget()
+        self.favorites_list.keyPressEvent = self.list_key_press
+        self.stacked_widget.addWidget(self.favorites_list)
+        
+        # 添加按钮布局
+        button_layout = QHBoxLayout()
+        layout.addLayout(button_layout)
         
         # 创建"复制选中项"按钮
         copy_button = QPushButton("复制选中项")
         copy_button.clicked.connect(self.copy_selected)
-        layout.addWidget(copy_button)
+        button_layout.addWidget(copy_button)
         
         # 清空历史按钮
         clear_button = QPushButton("清空历史")
         clear_button.clicked.connect(self.clear_history)
-        layout.addWidget(clear_button)
+        button_layout.addWidget(clear_button)
+        
+        # 存储收藏夹数据
+        self.favorites = []
+        self.favorites_file = os.path.join(os.path.expanduser('~'), '.clipboard_favorites.json')
+        
+        # 加载收藏记录
+        self.load_favorites()
         
         # 存储剪贴板历史
         self.clipboard_history = []
@@ -78,7 +106,7 @@ class ClipboardHistoryApp(QMainWindow):
         
         self.last_text = self.clipboard.text()
         
-        # 设置保存文件的路径
+        # 设置保存文���的路径
         self.history_file = os.path.join(os.path.expanduser('~'), '.clipboard_history.json')
         
         # 加载历史记录
@@ -125,7 +153,9 @@ class ClipboardHistoryApp(QMainWindow):
             self.save_history()
 
     def copy_selected(self):
-        current_item = self.history_list.currentItem()
+        """复制选中项"""
+        current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
+        current_item = current_list.currentItem()
         if current_item:
             self.clipboard.setText(current_item.text())
 
@@ -149,7 +179,7 @@ class ClipboardHistoryApp(QMainWindow):
             self.clipboard_history = []
 
     def save_history(self):
-        """保存历史记录到文件"""
+        """保存历史���录到文件"""
         try:
             with open(self.history_file, 'w', encoding='utf-8') as f:
                 json.dump(self.clipboard_history, f, ensure_ascii=False, indent=2)
@@ -231,21 +261,27 @@ class ClipboardHistoryApp(QMainWindow):
             self.paste_selected()
         elif event.key() == Qt.Key.Key_Escape:
             self.hide()
+        elif event.key() == Qt.Key.Key_Right and self.stacked_widget.currentIndex() == 0:
+            # 切换到收藏面板
+            self.stacked_widget.setCurrentIndex(1)
+            self.panel_label.setText("收藏夹")
+            self.favorites_list.setFocus()
+        elif event.key() == Qt.Key.Key_Left and self.stacked_widget.currentIndex() == 1:
+            # 切换到历史记录面板
+            self.stacked_widget.setCurrentIndex(0)
+            self.panel_label.setText("历史记录")
+            self.history_list.setFocus()
         else:
             # 保持其他按键的默认行为
-            QListWidget.keyPressEvent(self.history_list, event)
+            QListWidget.keyPressEvent(self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list, event)
 
     def paste_selected(self):
         """复制选中项并模拟粘贴操作"""
-        current_item = self.history_list.currentItem()
+        current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
+        current_item = current_list.currentItem()
         if current_item:
-            # 复制选中的文本到剪贴板
             self.clipboard.setText(current_item.text())
-            
-            # ��藏窗口
             self.hide()
-            
-            # 短暂延迟后模拟 Ctrl+V 按键
             QTimer.singleShot(100, lambda: keyboard.send('ctrl+v'))
 
     def show_window(self):
@@ -257,6 +293,10 @@ class ClipboardHistoryApp(QMainWindow):
             screen.center().x() - self.width() // 2,
             screen.center().y() - self.height() // 2
         )
+        
+        # 显示时默认显示历史记录面板
+        self.stacked_widget.setCurrentIndex(0)
+        self.panel_label.setText("历史记录")
         
         # 临时设置置顶标志
         self.setWindowFlags(
@@ -293,6 +333,56 @@ class ClipboardHistoryApp(QMainWindow):
             self.hide()
         else:
             super().keyPressEvent(event)
+
+    def show_history_context_menu(self, position):
+        """显示历史记录的右键菜单"""
+        print("右键菜单被触发")  # 调试信息
+        menu = QMenu()
+        current_item = self.history_list.currentItem()
+        
+        if current_item:
+            print(f"当前选中项: {current_item.text()}")  # 调试信息
+            add_to_favorites = menu.addAction("添加到收藏")
+            action = menu.exec(self.history_list.mapToGlobal(position))
+            
+            if action == add_to_favorites:
+                print("选择了添加到收藏选项")  # 调试信息
+                self.add_to_favorites(current_item.text())
+
+    def add_to_favorites(self, text):
+        """添加文本到收藏夹"""
+        print(f"尝试添加到收藏: {text}")  # 调试信息
+        if text not in self.favorites:
+            print("添加新收藏项")  # 调试信息
+            # 在列表开头插入新项目
+            self.favorites.insert(0, text)
+            # 在收藏列表控件的顶部插入新项目
+            self.favorites_list.insertItem(0, text)
+            self.save_favorites()
+        else:
+            print("该项目已在收藏中")  # 调试信息
+
+    def load_favorites(self):
+        """从文件加载收藏记录"""
+        try:
+            if os.path.exists(self.favorites_file):
+                with open(self.favorites_file, 'r', encoding='utf-8') as f:
+                    self.favorites = json.load(f)
+                    # 从后向前添加，保持最新的在最上面
+                    for text in reversed(self.favorites):
+                        self.favorites_list.insertItem(0, text)
+        except Exception as e:
+            print(f"加载收藏记录时出错: {e}")
+            self.favorites = []
+
+    def save_favorites(self):
+        """保存收藏记录到文件"""
+        try:
+            with open(self.favorites_file, 'w', encoding='utf-8') as f:
+                json.dump(self.favorites, f, ensure_ascii=False, indent=2)
+            print(f"收藏已保存到: {self.favorites_file}")  # 调试信息
+        except Exception as e:
+            print(f"保存收藏记录时出错: {e}")  # 调试信息
 
 def main():
     app = QApplication(sys.argv)
