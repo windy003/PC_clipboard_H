@@ -16,11 +16,12 @@ class HotkeyThread(QThread):
         super().__init__()
         self.running = True
         self.hotkey = hotkey
-
+        self.keys_pressed = set()
+        
     def run(self):
         try:
-            keyboard.unhook_all()
-            keyboard.add_hotkey(self.hotkey, self.on_hotkey, suppress=True)
+            # 使用 keyboard 库只注册热键组合
+            keyboard.add_hotkey(self.hotkey, self.on_hotkey)
             print(f"热键已注册: {self.hotkey}")
             
             while self.running:
@@ -35,7 +36,7 @@ class HotkeyThread(QThread):
 
     def stop(self):
         self.running = False
-        keyboard.unhook_all()
+        keyboard.remove_hotkey(self.hotkey)  # 只移除特定的热键
         print("热键已清理")
 
 class HotkeySettingDialog(QDialog):
@@ -73,45 +74,57 @@ class HotkeySettingDialog(QDialog):
         """开始监听按键"""
         self.listening = True
         self.keys_pressed.clear()
-        keyboard.hook(self.on_key_event)
+        # 只监听这个对话框的按键事件，不使用全局hook
+        self.installEventFilter(self)
         
     def stop_listening(self, event):
         """停止监听按键"""
         self.listening = False
-        keyboard.unhook_all()
+        self.removeEventFilter(self)
         
-    def on_key_event(self, event):
+    def eventFilter(self, obj, event):
         """处理按键事件"""
-        if not self.listening or not event.event_type == keyboard.KEY_DOWN:
-            return
+        if event.type() == event.Type.KeyPress and self.listening:
+            key_event = event
+            key_text = key_event.text().lower()
             
-        key_name = event.name.lower()
+            # 特殊键映射
+            special_keys = {
+                Qt.Key.Key_Control: 'ctrl',
+                Qt.Key.Key_Alt: 'alt',
+                Qt.Key.Key_Shift: 'shift',
+                Qt.Key.Key_Meta: 'win'  # Meta 键就是 Windows 键
+            }
+            
+            # 检查修饰键
+            modifiers = key_event.modifiers()
+            pressed_keys = set()
+            
+            if modifiers & Qt.KeyboardModifier.ControlModifier:
+                pressed_keys.add('ctrl')
+            if modifiers & Qt.KeyboardModifier.AltModifier:
+                pressed_keys.add('alt')
+            if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                pressed_keys.add('shift')
+            if modifiers & Qt.KeyboardModifier.MetaModifier:
+                pressed_keys.add('win')
+                
+            # 如果按下的是修饰键本身
+            if key_event.key() in special_keys:
+                key_name = special_keys[key_event.key()]
+                if key_name not in pressed_keys:
+                    pressed_keys.add(key_name)
+            elif key_text:  # 如果是普通键
+                # 组合键
+                hotkey_parts = list(pressed_keys) + [key_text]
+                self.new_hotkey = '+'.join(sorted(hotkey_parts))
+                self.hotkey_display.setText(self.new_hotkey)
+                self.listening = False
+                
+            return True
+        return super().eventFilter(obj, event)
         
-        # 特殊键映射，添加 Win 键的映射
-        key_mapping = {
-            'left ctrl': 'ctrl',
-            'right ctrl': 'ctrl',
-            'left alt': 'alt',
-            'right alt': 'alt',
-            'left shift': 'shift',
-            'right shift': 'shift',
-            'left windows': 'win',
-            'right windows': 'win',
-            'windows': 'win'
-        }
-        
-        key_name = key_mapping.get(key_name, key_name)
-        
-        # 更新按下的键，添加 win 到修饰键列表
-        if key_name in ['ctrl', 'alt', 'shift', 'win']:
-            self.keys_pressed.add(key_name)
-        else:
-            # 组合键
-            hotkey_parts = list(self.keys_pressed) + [key_name]
-            self.new_hotkey = '+'.join(sorted(hotkey_parts))
-            self.hotkey_display.setText(self.new_hotkey)
-            self.listening = False
-            keyboard.unhook_all()
+    # 移除 on_key_event 方法，因为我们不再使用 keyboard 库的 hook
 
 class PreviewWindow(QWidget):
     """悬浮预览窗口"""
@@ -336,7 +349,7 @@ class ClipboardHistoryApp(QMainWindow):
         """创建系统托盘图标"""
         self.tray_icon = QSystemTrayIcon(self)
         
-        # 使用资���路径获取图标
+        # 使用资源路径获取图标
         icon_path = get_resource_path("icon.ico")
         if os.path.exists(icon_path):
             self.tray_icon.setIcon(QIcon(icon_path))
@@ -375,7 +388,7 @@ class ClipboardHistoryApp(QMainWindow):
         self.tray_icon.activated.connect(self.tray_icon_activated)
 
     def create_default_icon(self):
-        """创��一个简单的默认图标"""
+        """创建一个简单的默认图标"""
         from PyQt6.QtGui import QPixmap, QPainter, QColor
         pixmap = QPixmap(32, 32)
         pixmap.fill(Qt.GlobalColor.transparent)
