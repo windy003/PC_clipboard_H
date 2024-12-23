@@ -32,7 +32,7 @@ class HotkeyThread(QThread):
             print(f"热键注册错误: {e}")  # 调试信息
 
     def on_hotkey(self):
-        print("热键被触发")  # 调试信息
+        print("热键被触��")  # 调试信息
         self.triggered.emit()
 
     def stop(self):
@@ -73,7 +73,7 @@ class ClipboardHistoryApp(QMainWindow):
         self.setGeometry(100, 100, 400, 300)
         
         # 设置窗口图标
-        icon_path = os.path.join(os.path.dirname(__file__), "icon.ico")
+        icon_path = get_resource_path("icon.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
         
@@ -240,14 +240,14 @@ class ClipboardHistoryApp(QMainWindow):
             with open(self.history_file, 'w', encoding='utf-8') as f:
                 json.dump(self.clipboard_history, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"保存历史记录时出错: {e}")
+            print(f"保存历史记录时出���: {e}")
 
     def create_tray_icon(self):
         """创建系统托盘图标"""
         self.tray_icon = QSystemTrayIcon(self)
         
-        # 使用项目目录下的图标文件
-        icon_path = os.path.join(os.path.dirname(__file__), "icon.ico")
+        # 使用资源路径获取图标
+        icon_path = get_resource_path("icon.ico")
         if os.path.exists(icon_path):
             self.tray_icon.setIcon(QIcon(icon_path))
         else:
@@ -499,7 +499,7 @@ class ClipboardHistoryApp(QMainWindow):
                 if preview_x + self.preview_window.width() > screen.right():
                     preview_x = global_pos.x() - self.preview_window.width() - 10
                 
-                # 如果预览窗口超出屏幕底部，则向上调整位置
+                # 如果预览窗口超出屏幕底部，则向上调���位置
                 if preview_y + self.preview_window.height() > screen.bottom():
                     preview_y = screen.bottom() - self.preview_window.height()
                 
@@ -515,6 +515,17 @@ class ClipboardHistoryApp(QMainWindow):
         """重写hide方法，同时隐藏预览窗口"""
         super().hide()
         self.preview_window.hide()
+
+def get_resource_path(relative_path):
+    """获取资源文件的绝对路径"""
+    try:
+        # PyInstaller创建临时文件夹,将路径存储在_MEIPASS中
+        base_path = sys._MEIPASS
+    except Exception:
+        # 如果不是打包的情况,就使用当前文件的路径
+        base_path = os.path.dirname(__file__)
+    
+    return os.path.join(base_path, relative_path)
 
 def main():
     app = QApplication(sys.argv)
