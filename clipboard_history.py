@@ -32,7 +32,7 @@ class HotkeyThread(QThread):
             print(f"热键注册错误: {e}")  # 调试信息
 
     def on_hotkey(self):
-        print("热键被触发")  # 调试信息
+        print("热键被触��")  # 调试信息
         self.triggered.emit()
 
     def stop(self):
@@ -93,7 +93,7 @@ class ClipboardHistoryApp(QMainWindow):
         
         # 添加提示文字
         hint_label = QLabel("(按左右方向键以切换历史和收藏面板)")
-        hint_label.setStyleSheet("color: gray;")  # 使提示文字颜���变淡
+        hint_label.setStyleSheet("color: gray;")  # 使提示文字颜色变淡
         top_layout.addWidget(hint_label)
         
         top_layout.addStretch()  # 添加弹性空间，使标签靠左对齐
@@ -112,6 +112,10 @@ class ClipboardHistoryApp(QMainWindow):
         # 创建收藏列表
         self.favorites_list = QListWidget()
         self.favorites_list.keyPressEvent = self.list_key_press
+        self.favorites_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)  # 启用内部拖拽
+        self.favorites_list.setDefaultDropAction(Qt.DropAction.MoveAction)  # 设置默认拖拽动作为移动
+        self.favorites_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)  # 单选模式
+        self.favorites_list.model().rowsMoved.connect(self.on_favorites_reordered)  # 连接重排序信号
         self.stacked_widget.addWidget(self.favorites_list)
         
         # 添加按钮布局
@@ -217,7 +221,7 @@ class ClipboardHistoryApp(QMainWindow):
         current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
         current_item = current_list.currentItem()
         if current_item:
-            # 使用原始文本而不是截断的文本
+            # ��用原始文本而不是截断的文本
             original_text = (self.clipboard_history if self.stacked_widget.currentIndex() == 0 
                             else self.favorites)[current_list.currentRow()]
             self.clipboard.setText(original_text)
@@ -349,7 +353,7 @@ class ClipboardHistoryApp(QMainWindow):
             self.save_favorites()
 
     def paste_selected(self):
-        """复制选中项并模拟粘贴操作"""
+        """复制选���项并模拟粘贴操作"""
         current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
         current_item = current_list.currentItem()
         if current_item:
@@ -419,12 +423,12 @@ class ClipboardHistoryApp(QMainWindow):
         if current_item:
             # 获取原始文本而不是截断的文本
             original_text = self.clipboard_history[self.history_list.currentRow()]
-            print(f"当前选中项: {original_text}")  # 调试信息
+            print(f"当前选中��: {original_text}")  # 调试信息
             add_to_favorites = menu.addAction("添加到收藏")
             action = menu.exec(self.history_list.mapToGlobal(position))
             
             if action == add_to_favorites:
-                print("选择了添加到收藏选项")  # 调试信息
+                print("选择了��加到收藏选项")  # 调试信息
                 self.add_to_favorites(original_text)
 
     def add_to_favorites(self, text):
@@ -522,6 +526,18 @@ class ClipboardHistoryApp(QMainWindow):
         """重写hide方法，同时隐藏预览窗口"""
         super().hide()
         self.preview_window.hide()
+
+    def on_favorites_reordered(self, parent, start, end, destination, row):
+        """处理收藏列表重排序"""
+        # 获取移动的项目
+        moved_item = self.favorites[start]
+        # 从原位置删除
+        self.favorites.pop(start)
+        # 插入到新位置
+        new_position = row if row < start else row - 1
+        self.favorites.insert(new_position, moved_item)
+        # 保存更新后的收藏列表
+        self.save_favorites()
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径"""
