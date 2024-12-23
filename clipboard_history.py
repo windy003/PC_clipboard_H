@@ -32,7 +32,7 @@ class HotkeyThread(QThread):
             print(f"热键注册错误: {e}")  # 调试信息
 
     def on_hotkey(self):
-        print("热键被触��")  # 调试信息
+        print("热键被触发")  # 调试信息
         self.triggered.emit()
 
     def stop(self):
@@ -53,11 +53,12 @@ class PreviewWindow(QWidget):
             QTextEdit {
                 border: none;
                 background-color: transparent;
+                padding: 5px;  /* 添加内边距 */
             }
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setContentsMargins(10, 10, 10, 10)  # 增加边距
         
         self.text_edit = QTextEdit()
         self.text_edit.setReadOnly(True)
@@ -92,7 +93,7 @@ class ClipboardHistoryApp(QMainWindow):
         
         # 添加提示文字
         hint_label = QLabel("(按左右方向键以切换历史和收藏面板)")
-        hint_label.setStyleSheet("color: gray;")  # 使提示文字颜色变淡
+        hint_label.setStyleSheet("color: gray;")  # 使提示文字颜���变淡
         top_layout.addWidget(hint_label)
         
         top_layout.addStretch()  # 添加弹性空间，使标签靠左对齐
@@ -186,6 +187,14 @@ class ClipboardHistoryApp(QMainWindow):
         # 为两个列表添加选择变化事件
         self.history_list.currentItemChanged.connect(self.show_preview)
         self.favorites_list.currentItemChanged.connect(self.show_preview)
+        
+        # 设置列表项为单行显示
+        self.history_list.setWordWrap(False)  # 禁用自动换行
+        self.favorites_list.setWordWrap(False)  # 禁用自动换行
+        
+        # 设置固定行高
+        self.history_list.setStyleSheet("QListWidget::item { height: 25px; }")
+        self.favorites_list.setStyleSheet("QListWidget::item { height: 25px; }")
 
     def check_clipboard(self):
         current_text = self.clipboard.text()
@@ -240,7 +249,7 @@ class ClipboardHistoryApp(QMainWindow):
             with open(self.history_file, 'w', encoding='utf-8') as f:
                 json.dump(self.clipboard_history, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"保存历史记录时出���: {e}")
+            print(f"保存历史记录时出错: {e}")
 
     def create_tray_icon(self):
         """创建系统托盘图标"""
@@ -458,6 +467,9 @@ class ClipboardHistoryApp(QMainWindow):
 
     def truncate_text(self, text, max_length=50):
         """截断文本，保留指定长度，添加省略号"""
+        # 移除文本中的换行符
+        text = text.replace('\n', ' ').replace('\r', '')
+        
         if len(text) > max_length:
             return text[:max_length] + "..."
         return text
@@ -473,16 +485,11 @@ class ClipboardHistoryApp(QMainWindow):
         current_row = current_list.currentRow()
         data_list = self.clipboard_history if self.stacked_widget.currentIndex() == 0 else self.favorites
         
-        print(f"当前行号: {current_row}")  # 调试信息
-        print(f"当前面板: {'历史记录' if self.stacked_widget.currentIndex() == 0 else '收藏夹'}")  # 调试信息
-        print(f"列表项文本: {current.text()}")  # 调试信息
-        
         if 0 <= current_row < len(data_list):
             original_text = data_list[current_row]
-            print(f"原始文本: {original_text}")  # 调试信息
             
-            # 如果文本长度超过截断长度，才显示预览窗口
-            if len(original_text) > 50:  # 根据 truncate_text 的 max_length 参数调整
+            # 如果文本包含换行符或长度超过截断长度，才显示预览窗口
+            if '\n' in original_text or len(original_text) > 50:
                 self.preview_window.text_edit.setText(original_text)
                 
                 # 计算预览窗口位置
@@ -499,7 +506,7 @@ class ClipboardHistoryApp(QMainWindow):
                 if preview_x + self.preview_window.width() > screen.right():
                     preview_x = global_pos.x() - self.preview_window.width() - 10
                 
-                # 如果预览窗口超出屏幕底部，则向上调���位置
+                # 如果预览窗口超出屏幕底部，则向上调整位置
                 if preview_y + self.preview_window.height() > screen.bottom():
                     preview_y = screen.bottom() - self.preview_window.height()
                 
