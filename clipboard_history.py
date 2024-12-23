@@ -70,7 +70,7 @@ class ClipboardHistoryApp(QMainWindow):
         self.stacked_widget = QStackedWidget()
         layout.addWidget(self.stacked_widget)
         
-        # 创建历史记录列表
+        # ��建历史记录列表
         self.history_list = QListWidget()
         self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.history_list.customContextMenuRequested.connect(self.show_history_context_menu)
@@ -159,7 +159,9 @@ class ClipboardHistoryApp(QMainWindow):
         text = self.clipboard.text()
         if text and text not in self.clipboard_history:
             self.clipboard_history.insert(0, text)
-            self.history_list.insertItem(0, text)
+            # 显示截断后的文本
+            truncated_text = self.truncate_text(text)
+            self.history_list.insertItem(0, truncated_text)
             # 每次更新后保存历史记录
             self.save_history()
 
@@ -168,7 +170,10 @@ class ClipboardHistoryApp(QMainWindow):
         current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
         current_item = current_list.currentItem()
         if current_item:
-            self.clipboard.setText(current_item.text())
+            # 使用原始文本而不是截断的文本
+            original_text = (self.clipboard_history if self.stacked_widget.currentIndex() == 0 
+                            else self.favorites)[current_list.currentRow()]
+            self.clipboard.setText(original_text)
 
     def clear_history(self):
         self.clipboard_history.clear()
@@ -182,9 +187,10 @@ class ClipboardHistoryApp(QMainWindow):
             if os.path.exists(self.history_file):
                 with open(self.history_file, 'r', encoding='utf-8') as f:
                     self.clipboard_history = json.load(f)
-                    # 将历史记录显示到列表中
+                    # 将历史记录显示到列表中，使用截断的文本
                     for text in self.clipboard_history:
-                        self.history_list.insertItem(0, text)
+                        truncated_text = self.truncate_text(text)
+                        self.history_list.insertItem(0, truncated_text)
         except Exception as e:
             print(f"加载历史记录时出错: {e}")
             self.clipboard_history = []
@@ -291,7 +297,10 @@ class ClipboardHistoryApp(QMainWindow):
         current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
         current_item = current_list.currentItem()
         if current_item:
-            self.clipboard.setText(current_item.text())
+            # 使用原始文本而不是截断的文本
+            original_text = (self.clipboard_history if self.stacked_widget.currentIndex() == 0 
+                            else self.favorites)[current_list.currentRow()]
+            self.clipboard.setText(original_text)
             self.hide()
             QTimer.singleShot(100, lambda: keyboard.send('ctrl+v'))
 
@@ -362,16 +371,12 @@ class ClipboardHistoryApp(QMainWindow):
 
     def add_to_favorites(self, text):
         """添加文本到收藏夹"""
-        print(f"尝试添加到收藏: {text}")  # 调试信息
         if text not in self.favorites:
-            print("添加新收藏项")  # 调试信息
-            # 在列表开头插入新项目
             self.favorites.insert(0, text)
-            # 在收藏列表控件的顶部插入新项目
-            self.favorites_list.insertItem(0, text)
+            # 显示截断后的文本
+            truncated_text = self.truncate_text(text)
+            self.favorites_list.insertItem(0, truncated_text)
             self.save_favorites()
-        else:
-            print("该项目已在收藏中")  # 调试信息
 
     def load_favorites(self):
         """从文件加载收藏记录"""
@@ -379,9 +384,10 @@ class ClipboardHistoryApp(QMainWindow):
             if os.path.exists(self.favorites_file):
                 with open(self.favorites_file, 'r', encoding='utf-8') as f:
                     self.favorites = json.load(f)
-                    # 从后向前添加，保持最新的在最上面
+                    # 从后向前添加，保持最新的在最上面，使用截断的文本
                     for text in reversed(self.favorites):
-                        self.favorites_list.insertItem(0, text)
+                        truncated_text = self.truncate_text(text)
+                        self.favorites_list.insertItem(0, truncated_text)
         except Exception as e:
             print(f"加载收藏记录时出错: {e}")
             self.favorites = []
@@ -394,6 +400,12 @@ class ClipboardHistoryApp(QMainWindow):
             print(f"收藏已保存到: {self.favorites_file}")  # 调试信息
         except Exception as e:
             print(f"保存收藏记录时出错: {e}")  # 调试信息
+
+    def truncate_text(self, text, max_length=50):
+        """截断文本，保留指定长度，添加省略号"""
+        if len(text) > max_length:
+            return text[:max_length] + "..."
+        return text
 
 def main():
     app = QApplication(sys.argv)
