@@ -182,7 +182,7 @@ class ClipboardHistoryApp(QMainWindow):
         
         top_layout.addStretch()  # 添加弹性空间，使标签靠左对齐
         
-        # 创建堆叠式窗口部件
+        # 创建堆叠式���口部件
         self.stacked_widget = QStackedWidget()
         layout.addWidget(self.stacked_widget)
         
@@ -280,7 +280,7 @@ class ClipboardHistoryApp(QMainWindow):
         self.history_list.currentItemChanged.connect(self.show_preview)
         self.favorites_list.currentItemChanged.connect(self.show_preview)
         
-        # 设置列��项为单行显示
+        # 设置列表项为单行显示
         self.history_list.setWordWrap(False)  # 禁用自动换行
         self.favorites_list.setWordWrap(False)  # 禁用自动换行
         
@@ -499,21 +499,22 @@ class ClipboardHistoryApp(QMainWindow):
             original_text = (self.clipboard_history if self.stacked_widget.currentIndex() == 0 
                             else self.favorites)[current_row]
             
-            # 如果是从历史记录面板选择的，将该项移到顶部
-            if self.stacked_widget.currentIndex() == 0:
-                # 从原位置移除
-                self.clipboard_history.pop(current_row)
-                self.history_list.takeItem(current_row)
-                
-                # 插入到顶部
-                self.clipboard_history.insert(0, original_text)
-                truncated_text = self.truncate_text(original_text)
-                self.history_list.insertItem(0, truncated_text)
-                
-                # 更新编号
-                self.update_list_numbers(self.history_list)
-                # 保存历史记录
-                self.save_history()
+            # 无论是从历史记录还是收藏夹，都将内容更新到历史记录顶部
+            if original_text in self.clipboard_history:
+                # 如果已存在，先移除旧的
+                old_index = self.clipboard_history.index(original_text)
+                self.clipboard_history.pop(old_index)
+                self.history_list.takeItem(old_index)
+            
+            # 插入到顶部
+            self.clipboard_history.insert(0, original_text)
+            truncated_text = self.truncate_text(original_text)
+            self.history_list.insertItem(0, truncated_text)
+            
+            # 更新编号
+            self.update_list_numbers(self.history_list)
+            # 保存历史记录
+            self.save_history()
             
             self.clipboard.setText(original_text)
             self.hide()
@@ -552,7 +553,7 @@ class ClipboardHistoryApp(QMainWindow):
             self.hotkey_thread.wait()
 
     def eventFilter(self, obj, event):
-        """事件过滤器，处理窗口事件"""
+        """事件过滤��，处理窗口事件"""
         if event.type() == event.Type.WindowDeactivate:
             # 当窗口失去焦点时隐藏
             self.hide()
