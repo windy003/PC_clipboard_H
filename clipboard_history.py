@@ -182,7 +182,7 @@ class ClipboardHistoryApp(QMainWindow):
         
         top_layout.addStretch()  # 添加弹性空间，使标签靠左对齐
         
-        # 创建堆叠式���口部件
+        # 创建堆叠式窗口部件
         self.stacked_widget = QStackedWidget()
         layout.addWidget(self.stacked_widget)
         
@@ -311,10 +311,17 @@ class ClipboardHistoryApp(QMainWindow):
     def on_clipboard_change(self):
         text = self.clipboard.text()
         if text and text not in self.clipboard_history:
+            # 添加新条目到历史记录开头
             self.clipboard_history.insert(0, text)
             # 显示截断后的文本
             truncated_text = self.truncate_text(text)
             self.history_list.insertItem(0, truncated_text)
+            
+            # 如果历史记录超过10个，删除多余的条目
+            while len(self.clipboard_history) > 10:
+                self.clipboard_history.pop()
+                self.history_list.takeItem(self.history_list.count() - 1)
+            
             # 更新编号
             self.update_list_numbers(self.history_list)
             # 保存历史记录
@@ -553,7 +560,7 @@ class ClipboardHistoryApp(QMainWindow):
             self.hotkey_thread.wait()
 
     def eventFilter(self, obj, event):
-        """事件过滤��，处理窗口事件"""
+        """事件过滤器，处理窗口事件"""
         if event.type() == event.Type.WindowDeactivate:
             # 当窗口失去焦点时隐藏
             self.hide()
@@ -672,7 +679,7 @@ class ClipboardHistoryApp(QMainWindow):
             else:
                 self.preview_window.hide()
         else:
-            print(f"索引越界: {current_row} >= {len(data_list)}")  # 调试信息
+            print(f"索引越界: {current_row} >= {len(data_list)}")  # ���试信息
             self.preview_window.hide()
 
     def hide(self):
@@ -740,7 +747,7 @@ class ClipboardHistoryApp(QMainWindow):
             item.setText(f"{i+1}. {text}")
 
 def get_resource_path(relative_path):
-    """获取资源文件的绝对路径"""
+    """获取资源文件的绝��路径"""
     try:
         # PyInstaller创建临时文件夹,将路径存储在_MEIPASS中
         base_path = sys._MEIPASS
