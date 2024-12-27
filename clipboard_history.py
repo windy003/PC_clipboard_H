@@ -235,7 +235,7 @@ class ClipboardHistoryApp(QMainWindow):
         self.favorites_list.model().rowsMoved.connect(self.on_favorites_reordered)  # 连接重排序信号
         self.stacked_widget.addWidget(self.favorites_list)
         
-        # 为收���列表添加右键菜单
+        # 为收藏列表添加右键菜单
         self.favorites_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.favorites_list.customContextMenuRequested.connect(self.show_favorites_context_menu)
         
@@ -280,7 +280,7 @@ class ClipboardHistoryApp(QMainWindow):
         # 存储剪贴板历史
         self.clipboard_history = []
         
-        # 获取系统剪贴板
+        # 获取系���剪贴板
         self.clipboard = QApplication.clipboard()
         self.clipboard.dataChanged.connect(self.on_clipboard_change)
         
@@ -550,14 +550,35 @@ class ClipboardHistoryApp(QMainWindow):
             self.save_favorites()
 
     def delete_favorite(self):
-        """删除选中的收藏条目"""
+        """删除选中的收藏项"""
         current_row = self.favorites_list.currentRow()
-        if current_row >= 0:
+        if current_row >= 0:  # 确保有选中的项目
+            # 从数据中删除
+            self.favorites[self.current_folder].pop(current_row)
+            # 从列表控件中删除
             self.favorites_list.takeItem(current_row)
-            self.favorites.pop(current_row)
             # 更新编号
             self.update_list_numbers(self.favorites_list)
+            # 保存更改
             self.save_favorites()
+            
+            # 如果当前收藏夹为空且不是默认收藏夹，询问是否删除该收藏夹
+            if not self.favorites[self.current_folder] and self.current_folder != "默认收藏夹":
+                reply = QMessageBox.question(
+                    self,
+                    "删除收藏夹",
+                    f"收藏夹 '{self.current_folder}' 已空，是否删除该收藏夹？",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                )
+                if reply == QMessageBox.StandardButton.Yes:
+                    # 删除空收藏夹
+                    del self.favorites[self.current_folder]
+                    # 更新下拉菜单
+                    self.folder_combo.removeItem(self.folder_combo.findText(self.current_folder))
+                    # 切换到默认收藏夹
+                    self.current_folder = "默认收藏夹"
+                    self.folder_combo.setCurrentText("默认收藏夹")
+                    self.change_folder("默认收藏夹")
 
     def paste_selected(self):
         """复制选中项并模拟粘贴操作"""
@@ -672,20 +693,40 @@ class ClipboardHistoryApp(QMainWindow):
         try:
             if os.path.exists(self.favorites_file):
                 with open(self.favorites_file, 'r', encoding='utf-8') as f:
-                    self.favorites = json.load(f)
+                    data = json.load(f)
+                    
+                    # 处理旧格式数据（简单列表）
+                    if isinstance(data, list):
+                        self.favorites = {
+                            "默认收藏夹": data
+                        }
+                    # 新格式数据（字典格式）
+                    elif isinstance(data, dict):
+                        self.favorites = data
+                    
+                    # 确保至少有默认收藏夹
+                    if "默认收藏夹" not in self.favorites:
+                        self.favorites["默认收藏夹"] = []
+                    
                     # 更新收藏夹下拉菜单
                     self.folder_combo.clear()
                     self.folder_combo.addItems(self.favorites.keys())
+                    
                     # 显示默认收藏夹内容
                     self.current_folder = "默认收藏夹"
+                    self.folder_combo.setCurrentText("默认收藏夹")
                     self.favorites_list.clear()
                     for text in self.favorites[self.current_folder]:
                         truncated_text = self.truncate_text(text)
                         self.favorites_list.addItem(truncated_text)
                     self.update_list_numbers(self.favorites_list)
+                    
+                    # 保存为新格式
+                    self.save_favorites()
         except Exception as e:
             print(f"加载收藏记录时出错: {e}")
             self.favorites = {"默认收藏夹": []}
+            self.folder_combo.clear()
             self.folder_combo.addItem("默认收藏夹")
 
     def save_favorites(self):
@@ -743,7 +784,7 @@ class ClipboardHistoryApp(QMainWindow):
                 if preview_x + self.preview_window.width() > screen.right():
                     preview_x = global_pos.x() - self.preview_window.width() - 10
                 
-                # 如果预览窗口超出屏幕底部，则向上调整位置
+                # 如果预览窗口超出屏幕底部，则向上调整位���
                 if preview_y + self.preview_window.height() > screen.bottom():
                     preview_y = screen.bottom() - self.preview_window.height()
                 
