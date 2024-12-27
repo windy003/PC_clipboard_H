@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidget, 
                            QVBoxLayout, QPushButton, QWidget, QSystemTrayIcon, QMenu,
-                           QHBoxLayout, QStackedWidget, QLabel, QTextEdit, QDialog, QLineEdit, QMessageBox)
+                           QHBoxLayout, QStackedWidget, QLabel, QTextEdit, QDialog, QLineEdit, QMessageBox, QComboBox, QInputDialog)
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QClipboard, QIcon, QKeyEvent
 import sys
@@ -202,6 +202,10 @@ class ClipboardHistoryApp(QMainWindow):
         self.favorites_list.model().rowsMoved.connect(self.on_favorites_reordered)  # 连接重排序信号
         self.stacked_widget.addWidget(self.favorites_list)
         
+        # 为收藏列表添加右键菜单
+        self.favorites_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.favorites_list.customContextMenuRequested.connect(self.show_favorites_context_menu)
+        
         # 添加按钮布局
         button_layout = QHBoxLayout()
         layout.addLayout(button_layout)
@@ -216,8 +220,25 @@ class ClipboardHistoryApp(QMainWindow):
         clear_button.clicked.connect(self.clear_history)
         button_layout.addWidget(clear_button)
         
+        # 修改收藏夹数据结构
+        self.favorites = {
+            "默认收藏夹": []  # 默认收藏夹
+        }
+        self.current_folder = "默认收藏夹"
+        
+        # 创建收藏夹下拉菜单
+        self.folder_combo = QComboBox()
+        self.folder_combo.currentTextChanged.connect(self.change_folder)
+        
+        # 修改快捷键提示为 Alt+F
+        folder_layout = QHBoxLayout()
+        folder_hint = QLabel("(Alt+F)")
+        folder_hint.setStyleSheet("color: gray;")  # 使提示文字颜色变淡
+        folder_layout.addWidget(self.folder_combo)
+        folder_layout.addWidget(folder_hint)
+        top_layout.addLayout(folder_layout)
+        
         # 存储收藏夹数据
-        self.favorites = []
         self.favorites_file = os.path.join(os.path.expanduser('~'), '.clipboard_favorites.json')
         
         # 加载收藏记录
@@ -340,7 +361,7 @@ class ClipboardHistoryApp(QMainWindow):
     def clear_history(self):
         self.clipboard_history.clear()
         self.history_list.clear()
-        # 清空后也保存状态
+        # 清空后保存状态
         self.save_history()
 
     def load_history(self):
@@ -441,15 +462,24 @@ class ClipboardHistoryApp(QMainWindow):
         elif event.key() == Qt.Key.Key_Escape:
             self.hide()
         elif event.key() == Qt.Key.Key_Right and self.stacked_widget.currentIndex() == 0:
+            # 切换到收藏面板
             self.stacked_widget.setCurrentIndex(1)
             self.panel_label.setText("收藏夹")
             self.favorites_list.setFocus()
+            # 确保显示当前收藏夹的内容
+            self.change_folder(self.current_folder)
         elif event.key() == Qt.Key.Key_Left and self.stacked_widget.currentIndex() == 1:
             self.stacked_widget.setCurrentIndex(0)
             self.panel_label.setText("历史记录")
             self.history_list.setFocus()
         elif event.key() == Qt.Key.Key_Delete and self.stacked_widget.currentIndex() == 1:
             self.delete_favorite()
+        # 修改为 Alt+F 快捷键
+        elif (event.modifiers() == Qt.KeyboardModifier.AltModifier and 
+              event.key() == Qt.Key.Key_F and 
+              self.stacked_widget.currentIndex() == 1):
+            # 打开收藏夹下拉菜单
+            self.folder_combo.showPopup()
         elif (event.modifiers() == Qt.KeyboardModifier.AltModifier and 
               self.stacked_widget.currentIndex() == 1):
             if event.key() == Qt.Key.Key_Up:
@@ -504,7 +534,7 @@ class ClipboardHistoryApp(QMainWindow):
             # 使用原始文本而不是截断的文本
             current_row = current_list.currentRow()
             original_text = (self.clipboard_history if self.stacked_widget.currentIndex() == 0 
-                            else self.favorites)[current_row]
+                           else self.favorites[self.current_folder])[current_row]
             
             # 无论是从历史记录还是收藏夹，都将内容更新到历史记录顶部
             if original_text in self.clipboard_history:
@@ -595,9 +625,9 @@ class ClipboardHistoryApp(QMainWindow):
                 self.add_to_favorites(original_text)
 
     def add_to_favorites(self, text):
-        """添加文本到收藏夹"""
-        if text not in self.favorites:
-            self.favorites.insert(0, text)
+        """添加文本到当前收藏夹"""
+        if text not in self.favorites[self.current_folder]:
+            self.favorites[self.current_folder].insert(0, text)
             truncated_text = self.truncate_text(text)
             self.favorites_list.insertItem(0, truncated_text)
             # 更新编号
@@ -610,15 +640,20 @@ class ClipboardHistoryApp(QMainWindow):
             if os.path.exists(self.favorites_file):
                 with open(self.favorites_file, 'r', encoding='utf-8') as f:
                     self.favorites = json.load(f)
+                    # 更新收藏夹下拉菜单
+                    self.folder_combo.clear()
+                    self.folder_combo.addItems(self.favorites.keys())
+                    # 显示默认收藏夹内容
+                    self.current_folder = "默认收藏夹"
                     self.favorites_list.clear()
-                    for text in self.favorites:
+                    for text in self.favorites[self.current_folder]:
                         truncated_text = self.truncate_text(text)
                         self.favorites_list.addItem(truncated_text)
-                    # 更新编号
                     self.update_list_numbers(self.favorites_list)
         except Exception as e:
             print(f"加载收藏记录时出错: {e}")
-            self.favorites = []
+            self.favorites = {"默认收藏夹": []}
+            self.folder_combo.addItem("默认收藏夹")
 
     def save_favorites(self):
         """保存收藏记录到文件"""
@@ -630,7 +665,7 @@ class ClipboardHistoryApp(QMainWindow):
             print(f"保存收藏记录时出错: {e}")  # 调试信息
 
     def truncate_text(self, text, max_length=50):
-        """截断文本，保留指定长度，添加省略号"""
+        """截断文本，保留定长度添加省略号"""
         # 移除文本中的换行符
         text = text.replace('\n', ' ').replace('\r', '')
         
@@ -647,7 +682,12 @@ class ClipboardHistoryApp(QMainWindow):
         # 获取原始文本
         current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
         current_row = current_list.currentRow()
-        data_list = self.clipboard_history if self.stacked_widget.currentIndex() == 0 else self.favorites
+        
+        # 根据当前面板选择正确的数据源
+        if self.stacked_widget.currentIndex() == 0:
+            data_list = self.clipboard_history
+        else:
+            data_list = self.favorites[self.current_folder]  # 使用当前收藏夹的数据
         
         if 0 <= current_row < len(data_list):
             original_text = data_list[current_row]
@@ -679,16 +719,16 @@ class ClipboardHistoryApp(QMainWindow):
             else:
                 self.preview_window.hide()
         else:
-            print(f"索引越界: {current_row} >= {len(data_list)}")  # ���试信息
+            print(f"索引越界: {current_row} >= {len(data_list)}")  # 调试信息
             self.preview_window.hide()
 
     def hide(self):
-        """重写hide方法，同时隐藏预览窗口"""
+        """写hide方法，同时隐藏预览窗口"""
         super().hide()
         self.preview_window.hide()
 
     def on_favorites_reordered(self, parent, start, end, destination, row):
-        """处理收藏列表重排序"""
+        """处理收藏列表重排"""
         # 获取移动的项目
         moved_item = self.favorites[start]
         # 从原位置删除
@@ -746,8 +786,82 @@ class ClipboardHistoryApp(QMainWindow):
             # 添加新编号
             item.setText(f"{i+1}. {text}")
 
+    def show_favorites_context_menu(self, position):
+        """显示收藏夹的右键菜单"""
+        menu = QMenu()
+        current_item = self.favorites_list.currentItem()
+        
+        if current_item:
+            # 获取原始文本
+            current_row = self.favorites_list.currentRow()
+            original_text = self.favorites[self.current_folder][current_row]
+            
+            # 新建收藏夹选项
+            new_folder = menu.addAction("新建收藏夹...")
+            
+            # 移动到收藏夹子菜���
+            move_menu = menu.addMenu("移动到收藏夹")
+            for folder in self.favorites.keys():
+                if folder != self.current_folder:  # 不显示当前收藏夹
+                    move_menu.addAction(folder)
+            
+            # 删除选项
+            delete_action = menu.addAction("删除")
+            
+            action = menu.exec(self.favorites_list.mapToGlobal(position))
+            
+            if action:
+                if action == new_folder:
+                    self.create_new_folder(original_text)
+                elif action == delete_action:
+                    self.delete_favorite()
+                elif action.text() in self.favorites:  # 移动到其他收藏夹
+                    self.move_to_folder(original_text, action.text())
+
+    def create_new_folder(self, item_text):
+        """创建新收藏夹并移动选中项"""
+        folder_name, ok = QInputDialog.getText(self, "创建收藏夹", "请输入收藏夹名称:")
+        if ok and folder_name:
+            if folder_name not in self.favorites:
+                self.favorites[folder_name] = [item_text]
+                self.folder_combo.addItem(folder_name)
+                
+                # 从当前收藏夹移除
+                current_row = self.favorites_list.currentRow()
+                self.favorites[self.current_folder].pop(current_row)
+                self.favorites_list.takeItem(current_row)
+                
+                self.save_favorites()
+                self.update_list_numbers(self.favorites_list)
+            else:
+                QMessageBox.warning(self, "错误", "收藏夹名称已存在!")
+
+    def move_to_folder(self, item_text, target_folder):
+        """移动条目到指定收藏夹"""
+        if target_folder in self.favorites:
+            # 添加到目标收藏夹
+            self.favorites[target_folder].append(item_text)
+            
+            # 从当前收藏夹移除
+            current_row = self.favorites_list.currentRow()
+            self.favorites[self.current_folder].pop(current_row)
+            self.favorites_list.takeItem(current_row)
+            
+            self.save_favorites()
+            self.update_list_numbers(self.favorites_list)
+
+    def change_folder(self, folder_name):
+        """切换当前收藏夹"""
+        if folder_name in self.favorites:
+            self.current_folder = folder_name
+            self.favorites_list.clear()
+            for text in self.favorites[folder_name]:
+                truncated_text = self.truncate_text(text)
+                self.favorites_list.addItem(truncated_text)
+            self.update_list_numbers(self.favorites_list)
+
 def get_resource_path(relative_path):
-    """获取资源文件的绝��路径"""
+    """获取资源文件的绝对路径"""
     try:
         # PyInstaller创建临时文件夹,将路径存储在_MEIPASS中
         base_path = sys._MEIPASS
