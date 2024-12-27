@@ -151,6 +151,39 @@ class PreviewWindow(QWidget):
         self.setMinimumSize(300, 200)
         self.setMaximumSize(400, 300)
 
+class EditItemDialog(QDialog):
+    """编辑条目对话框"""
+    def __init__(self, parent=None, text=""):
+        super().__init__(parent)
+        self.setWindowTitle("编辑条目")
+        self.setFixedSize(400, 300)
+        
+        layout = QVBoxLayout(self)
+        
+        # 文本编辑框
+        self.text_edit = QTextEdit()
+        self.text_edit.setText(text)
+        layout.addWidget(self.text_edit)
+        
+        # 按钮布局
+        button_layout = QHBoxLayout()
+        
+        # 确认按钮 - 使用 Alt+O (O for OK)
+        self.confirm_button = QPushButton("确认(&O)")
+        self.confirm_button.clicked.connect(self.accept)
+        button_layout.addWidget(self.confirm_button)
+        
+        # 取消按钮 - 使用 Alt+C (C for Cancel)
+        self.cancel_button = QPushButton("取消(&C)")
+        self.cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(self.cancel_button)
+        
+        layout.addLayout(button_layout)
+    
+    def get_text(self):
+        """获取编辑后的文本"""
+        return self.text_edit.toPlainText()
+
 class ClipboardHistoryApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -202,7 +235,7 @@ class ClipboardHistoryApp(QMainWindow):
         self.favorites_list.model().rowsMoved.connect(self.on_favorites_reordered)  # 连接重排序信号
         self.stacked_widget.addWidget(self.favorites_list)
         
-        # 为收藏列表添加右键菜单
+        # 为收���列表添加右键菜单
         self.favorites_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.favorites_list.customContextMenuRequested.connect(self.show_favorites_context_menu)
         
@@ -796,10 +829,13 @@ class ClipboardHistoryApp(QMainWindow):
             current_row = self.favorites_list.currentRow()
             original_text = self.favorites[self.current_folder][current_row]
             
+            # 添加编辑选项
+            edit_action = menu.addAction("编辑")
+            
             # 新建收藏夹选项
             new_folder = menu.addAction("新建收藏夹...")
             
-            # 移动到收藏夹子菜���
+            # 移动到收藏夹子菜单
             move_menu = menu.addMenu("移动到收藏夹")
             for folder in self.favorites.keys():
                 if folder != self.current_folder:  # 不显示当前收藏夹
@@ -811,7 +847,9 @@ class ClipboardHistoryApp(QMainWindow):
             action = menu.exec(self.favorites_list.mapToGlobal(position))
             
             if action:
-                if action == new_folder:
+                if action == edit_action:
+                    self.edit_favorite_item(current_row)
+                elif action == new_folder:
                     self.create_new_folder(original_text)
                 elif action == delete_action:
                     self.delete_favorite()
@@ -859,6 +897,23 @@ class ClipboardHistoryApp(QMainWindow):
                 truncated_text = self.truncate_text(text)
                 self.favorites_list.addItem(truncated_text)
             self.update_list_numbers(self.favorites_list)
+
+    def edit_favorite_item(self, row):
+        """编辑收藏条目"""
+        if 0 <= row < len(self.favorites[self.current_folder]):
+            original_text = self.favorites[self.current_folder][row]
+            dialog = EditItemDialog(self, original_text)
+            
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                new_text = dialog.get_text()
+                if new_text and new_text != original_text:
+                    # 更新收藏夹中的文本
+                    self.favorites[self.current_folder][row] = new_text
+                    # 更新显示的文本
+                    truncated_text = self.truncate_text(new_text)
+                    self.favorites_list.item(row).setText(f"{row+1}. {truncated_text}")
+                    # 保存更改
+                    self.save_favorites()
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径"""
