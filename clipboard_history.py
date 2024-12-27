@@ -280,7 +280,7 @@ class ClipboardHistoryApp(QMainWindow):
         # 存储剪贴板历史
         self.clipboard_history = []
         
-        # 获取系���剪贴板
+        # 获取系统剪贴板
         self.clipboard = QApplication.clipboard()
         self.clipboard.dataChanged.connect(self.on_clipboard_change)
         
@@ -315,7 +315,7 @@ class ClipboardHistoryApp(QMainWindow):
             Qt.WindowType.FramelessWindowHint
         )
         
-        # 安装事件过滤器来处理窗口事件
+        # 安装事件过滤器来处���窗口事件
         self.installEventFilter(self)
         
         # 为列表控件启用按键事件
@@ -538,15 +538,19 @@ class ClipboardHistoryApp(QMainWindow):
         
         new_row = current_row + direction
         if 0 <= new_row < self.favorites_list.count():
+            # 从列表控件中移动项目
             item = self.favorites_list.takeItem(current_row)
             self.favorites_list.insertItem(new_row, item)
             self.favorites_list.setCurrentRow(new_row)
             
-            item = self.favorites.pop(current_row)
-            self.favorites.insert(new_row, item)
+            # 从收藏夹数据中移动项目
+            current_folder_items = self.favorites[self.current_folder]
+            item_text = current_folder_items.pop(current_row)
+            current_folder_items.insert(new_row, item_text)
             
             # 更新编号
             self.update_list_numbers(self.favorites_list)
+            # 保存更改
             self.save_favorites()
 
     def delete_favorite(self):
@@ -784,7 +788,7 @@ class ClipboardHistoryApp(QMainWindow):
                 if preview_x + self.preview_window.width() > screen.right():
                     preview_x = global_pos.x() - self.preview_window.width() - 10
                 
-                # 如果预览窗口超出屏幕底部，则向上调整位���
+                # 如果预览窗口超出屏幕底部，则向上调整位置
                 if preview_y + self.preview_window.height() > screen.bottom():
                     preview_y = screen.bottom() - self.preview_window.height()
                 
