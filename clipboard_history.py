@@ -124,6 +124,46 @@ class HotkeySettingDialog(QDialog):
                 self.new_hotkey = '+'.join(sorted(self.key_combination))
                 self.hotkey_display.setText(self.new_hotkey)
 
+class DescriptionDialog(QDialog):
+    """描述信息编辑对话框"""
+    def __init__(self, parent=None, text="", description=""):
+        super().__init__(parent)
+        self.setWindowTitle("编辑描述信息")
+        self.setFixedSize(400, 300)
+        
+        layout = QVBoxLayout(self)
+        
+        # 显示条目内容（只读）- 添加 Alt+T 快捷键
+        content_label = QLabel("条目内容(&T):")  # 使用 & 标记快捷键字母
+        layout.addWidget(content_label)
+        self.content_text = QTextEdit()
+        self.content_text.setPlainText(text)
+        self.content_text.setReadOnly(True)
+        self.content_text.setMaximumHeight(100)
+        layout.addWidget(self.content_text)
+        content_label.setBuddy(self.content_text)  # 将标签与文本框关联
+        
+        # 描述信息编辑框 - 添加 Alt+D 快捷键
+        description_label = QLabel("描述信息(&D):")
+        layout.addWidget(description_label)
+        self.description_edit = QTextEdit()
+        self.description_edit.setPlainText(description)
+        layout.addWidget(self.description_edit)
+        description_label.setBuddy(self.description_edit)
+        
+        # 按钮布局
+        button_layout = QHBoxLayout()
+        self.confirm_button = QPushButton("确认(&O)")  # Alt+O
+        self.confirm_button.clicked.connect(self.accept)
+        self.cancel_button = QPushButton("取消(&C)")   # Alt+C
+        self.cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(self.confirm_button)
+        button_layout.addWidget(self.cancel_button)
+        layout.addLayout(button_layout)
+    
+    def get_description(self):
+        return self.description_edit.toPlainText()
+
 class PreviewWindow(QWidget):
     """悬浮预览窗口"""
     def __init__(self, parent=None):
@@ -137,19 +177,42 @@ class PreviewWindow(QWidget):
             QTextEdit {
                 border: none;
                 background-color: transparent;
-                padding: 5px;  /* 添加内边距 */
+                padding: 5px;
+            }
+            QLabel {
+                color: #666;
+                padding: 5px;
             }
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)  # 增加边距
+        layout.setContentsMargins(10, 10, 10, 10)
         
+        # 内容显示
         self.text_edit = QTextEdit()
         self.text_edit.setReadOnly(True)
         layout.addWidget(self.text_edit)
         
+        # 描述信息显示
+        self.description_label = QLabel("描述:")
+        layout.addWidget(self.description_label)
+        self.description_edit = QTextEdit()
+        self.description_edit.setReadOnly(True)
+        self.description_edit.setMaximumHeight(100)
+        layout.addWidget(self.description_edit)
+        
         self.setMinimumSize(300, 200)
-        self.setMaximumSize(400, 300)
+        self.setMaximumSize(400, 400)
+    
+    def set_content(self, text, description=""):
+        self.text_edit.setText(text)
+        if description:
+            self.description_label.show()
+            self.description_edit.show()
+            self.description_edit.setText(description)
+        else:
+            self.description_label.hide()
+            self.description_edit.hide()
 
 class EditItemDialog(QDialog):
     """编辑条目对话框"""
@@ -315,7 +378,7 @@ class ClipboardHistoryApp(QMainWindow):
             Qt.WindowType.FramelessWindowHint
         )
         
-        # 安装事件过滤器来处���窗口事件
+        # 安装事件过滤器来处理窗口事件
         self.installEventFilter(self)
         
         # 为列表控件启用按键事件
@@ -388,7 +451,7 @@ class ClipboardHistoryApp(QMainWindow):
         if current_item:
             # 使用原始文本而不是截断的文本
             original_text = (self.clipboard_history if self.stacked_widget.currentIndex() == 0 
-                            else self.favorites)[current_list.currentRow()]
+                            else self.favorites[self.current_folder])[current_list.currentRow()]
             self.clipboard.setText(original_text)
 
     def clear_history(self):
@@ -684,11 +747,18 @@ class ClipboardHistoryApp(QMainWindow):
 
     def add_to_favorites(self, text):
         """添加文本到当前收藏夹"""
-        if text not in self.favorites[self.current_folder]:
-            self.favorites[self.current_folder].insert(0, text)
+        # 创建新的收藏项
+        new_item = {
+            "text": text,
+            "description": ""
+        }
+        
+        # 检查是否已存在
+        existing_texts = [item["text"] for item in self.favorites[self.current_folder]]
+        if text not in existing_texts:
+            self.favorites[self.current_folder].insert(0, new_item)
             truncated_text = self.truncate_text(text)
             self.favorites_list.insertItem(0, truncated_text)
-            # 更新编号
             self.update_list_numbers(self.favorites_list)
             self.save_favorites()
 
@@ -702,11 +772,18 @@ class ClipboardHistoryApp(QMainWindow):
                     # 处理旧格式数据（简单列表）
                     if isinstance(data, list):
                         self.favorites = {
-                            "默认收藏夹": data
+                            "默认收藏夹": [{"text": item, "description": ""} for item in data]
                         }
                     # 新格式数据（字典格式）
                     elif isinstance(data, dict):
-                        self.favorites = data
+                        self.favorites = {}
+                        for folder, items in data.items():
+                            self.favorites[folder] = []
+                            for item in items:
+                                if isinstance(item, str):
+                                    self.favorites[folder].append({"text": item, "description": ""})
+                                else:
+                                    self.favorites[folder].append(item)
                     
                     # 确保至少有默认收藏夹
                     if "默认收藏夹" not in self.favorites:
@@ -720,13 +797,15 @@ class ClipboardHistoryApp(QMainWindow):
                     self.current_folder = "默认收藏夹"
                     self.folder_combo.setCurrentText("默认收藏夹")
                     self.favorites_list.clear()
-                    for text in self.favorites[self.current_folder]:
+                    for item in self.favorites[self.current_folder]:
+                        text = item["text"] if isinstance(item, dict) else item
                         truncated_text = self.truncate_text(text)
                         self.favorites_list.addItem(truncated_text)
                     self.update_list_numbers(self.favorites_list)
                     
                     # 保存为新格式
                     self.save_favorites()
+                
         except Exception as e:
             print(f"加载收藏记录时出错: {e}")
             self.favorites = {"默认收藏夹": []}
@@ -757,47 +836,51 @@ class ClipboardHistoryApp(QMainWindow):
             self.preview_window.hide()
             return
         
-        # 获取原始文本
         current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
         current_row = current_list.currentRow()
         
-        # 根据当前面板选择正确的数据源
-        if self.stacked_widget.currentIndex() == 0:
-            data_list = self.clipboard_history
-        else:
-            data_list = self.favorites[self.current_folder]  # 使用当前收藏夹的数据
-        
-        if 0 <= current_row < len(data_list):
-            original_text = data_list[current_row]
-            
-            # 如果文本包含换行符或长度超过截断长度，才显示预览窗口
-            if '\n' in original_text or len(original_text) > 50:
-                self.preview_window.text_edit.setText(original_text)
-                
-                # 计算预览窗口位置
-                list_widget = current_list
-                item_rect = list_widget.visualItemRect(current)
-                global_pos = list_widget.mapToGlobal(item_rect.topRight())
-                
-                # 调整位置，确保预览窗口在屏幕内
-                screen = QApplication.primaryScreen().geometry()
-                preview_x = global_pos.x() + 10  # 在列表右侧显示，留出10像素间距
-                preview_y = global_pos.y()
-                
-                # 如果预览窗口超出屏幕右边界，则显示在列表左侧
-                if preview_x + self.preview_window.width() > screen.right():
-                    preview_x = global_pos.x() - self.preview_window.width() - 10
-                
-                # 如果预览窗口超出屏幕底部，则向上调整位置
-                if preview_y + self.preview_window.height() > screen.bottom():
-                    preview_y = screen.bottom() - self.preview_window.height()
-                
-                self.preview_window.move(preview_x, preview_y)
-                self.preview_window.show()
+        try:
+            if self.stacked_widget.currentIndex() == 0:
+                # 历史记录面板
+                data_list = self.clipboard_history
+                original_text = data_list[current_row]
+                description = ""
             else:
-                self.preview_window.hide()
-        else:
-            print(f"索引越界: {current_row} >= {len(data_list)}")  # 调试信息
+                # 收藏夹面板
+                data_list = self.favorites[self.current_folder]
+                item = data_list[current_row]
+                # 处理新旧格式数据
+                if isinstance(item, str):
+                    original_text = item
+                    description = ""
+                else:
+                    original_text = item["text"]
+                    description = item.get("description", "")
+            
+            if 0 <= current_row < len(data_list):
+                if '\n' in original_text or len(original_text) > 50 or description:
+                    self.preview_window.set_content(original_text, description)
+                    
+                    list_widget = current_list
+                    item_rect = list_widget.visualItemRect(current)
+                    global_pos = list_widget.mapToGlobal(item_rect.topRight())
+                    
+                    screen = QApplication.primaryScreen().geometry()
+                    preview_x = global_pos.x() + 10
+                    preview_y = global_pos.y()
+                    
+                    if preview_x + self.preview_window.width() > screen.right():
+                        preview_x = global_pos.x() - self.preview_window.width() - 10
+                    
+                    if preview_y + self.preview_window.height() > screen.bottom():
+                        preview_y = screen.bottom() - self.preview_window.height()
+                    
+                    self.preview_window.move(preview_x, preview_y)
+                    self.preview_window.show()
+                else:
+                    self.preview_window.hide()
+        except Exception as e:
+            print(f"预览显示错误: {e}")
             self.preview_window.hide()
 
     def hide(self):
@@ -870,23 +953,19 @@ class ClipboardHistoryApp(QMainWindow):
         current_item = self.favorites_list.currentItem()
         
         if current_item:
-            # 获取原始文本
             current_row = self.favorites_list.currentRow()
-            original_text = self.favorites[self.current_folder][current_row]
+            favorite_item = self.favorites[self.current_folder][current_row]
+            original_text = favorite_item["text"]
             
-            # 添加编辑选项
-            edit_action = menu.addAction("编辑")
-            
-            # 新建收藏夹选项
+            edit_action = menu.addAction("编辑内容")
+            edit_description = menu.addAction("编辑描述")
             new_folder = menu.addAction("新建收藏夹...")
             
-            # 移动到收藏夹子菜单
             move_menu = menu.addMenu("移动到收藏夹")
             for folder in self.favorites.keys():
-                if folder != self.current_folder:  # 不显示当前收藏夹
+                if folder != self.current_folder:
                     move_menu.addAction(folder)
             
-            # 删除选项
             delete_action = menu.addAction("删除")
             
             action = menu.exec(self.favorites_list.mapToGlobal(position))
@@ -894,19 +973,23 @@ class ClipboardHistoryApp(QMainWindow):
             if action:
                 if action == edit_action:
                     self.edit_favorite_item(current_row)
+                elif action == edit_description:
+                    self.edit_favorite_description(current_row)
                 elif action == new_folder:
                     self.create_new_folder(original_text)
                 elif action == delete_action:
                     self.delete_favorite()
-                elif action.text() in self.favorites:  # 移动到其他收藏夹
-                    self.move_to_folder(original_text, action.text())
+                elif action.text() in self.favorites:
+                    self.move_to_folder(favorite_item, action.text())
 
     def create_new_folder(self, item_text):
         """创建新收藏夹并移动选中项"""
         folder_name, ok = QInputDialog.getText(self, "创建收藏夹", "请输入收藏夹名称:")
         if ok and folder_name:
             if folder_name not in self.favorites:
-                self.favorites[folder_name] = [item_text]
+                # 确保使用字典格式
+                new_item = {"text": item_text, "description": ""}
+                self.favorites[folder_name] = [new_item]
                 self.folder_combo.addItem(folder_name)
                 
                 # 从当前收藏夹移除
@@ -919,11 +1002,15 @@ class ClipboardHistoryApp(QMainWindow):
             else:
                 QMessageBox.warning(self, "错误", "收藏夹名称已存在!")
 
-    def move_to_folder(self, item_text, target_folder):
+    def move_to_folder(self, item, target_folder):
         """移动条目到指定收藏夹"""
         if target_folder in self.favorites:
+            # 确保使用字典格式
+            if not isinstance(item, dict):
+                item = {"text": str(item), "description": ""}
+            
             # 添加到目标收藏夹
-            self.favorites[target_folder].append(item_text)
+            self.favorites[target_folder].append(item)
             
             # 从当前收藏夹移除
             current_row = self.favorites_list.currentRow()
@@ -938,7 +1025,15 @@ class ClipboardHistoryApp(QMainWindow):
         if folder_name in self.favorites:
             self.current_folder = folder_name
             self.favorites_list.clear()
-            for text in self.favorites[folder_name]:
+            for item in self.favorites[folder_name]:
+                # 确保使用字典格式
+                if isinstance(item, dict):
+                    text = item["text"]
+                else:
+                    # 如果是旧格式，转换为新格式
+                    text = str(item)
+                    item = {"text": text, "description": ""}
+                
                 truncated_text = self.truncate_text(text)
                 self.favorites_list.addItem(truncated_text)
             self.update_list_numbers(self.favorites_list)
@@ -946,19 +1041,45 @@ class ClipboardHistoryApp(QMainWindow):
     def edit_favorite_item(self, row):
         """编辑收藏条目"""
         if 0 <= row < len(self.favorites[self.current_folder]):
-            original_text = self.favorites[self.current_folder][row]
+            # 获取原始条目
+            item = self.favorites[self.current_folder][row]
+            # 确保使用字典格式，获取文本内容
+            original_text = item["text"] if isinstance(item, dict) else str(item)
+            
             dialog = EditItemDialog(self, original_text)
             
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 new_text = dialog.get_text()
                 if new_text and new_text != original_text:
                     # 更新收藏夹中的文本
-                    self.favorites[self.current_folder][row] = new_text
+                    if isinstance(item, dict):
+                        item["text"] = new_text
+                    else:
+                        # 如果是旧格式，转换为新格式
+                        self.favorites[self.current_folder][row] = {
+                            "text": new_text,
+                            "description": ""
+                        }
                     # 更新显示的文本
                     truncated_text = self.truncate_text(new_text)
                     self.favorites_list.item(row).setText(f"{row+1}. {truncated_text}")
                     # 保存更改
                     self.save_favorites()
+
+    def edit_favorite_description(self, row):
+        """编辑收藏条目的描述信息"""
+        if 0 <= row < len(self.favorites[self.current_folder]):
+            favorite_item = self.favorites[self.current_folder][row]
+            dialog = DescriptionDialog(
+                self,
+                text=favorite_item["text"],
+                description=favorite_item["description"]
+            )
+            
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                new_description = dialog.get_description()
+                favorite_item["description"] = new_description
+                self.save_favorites()
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径"""
