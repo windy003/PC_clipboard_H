@@ -722,8 +722,13 @@ class ClipboardHistoryApp(QMainWindow):
         if current_item:
             # 使用原始文本而不是截断的文本
             current_row = current_list.currentRow()
-            original_text = (self.clipboard_history if self.stacked_widget.currentIndex() == 0 
-                           else self.favorites[self.current_folder])[current_row]
+            if self.stacked_widget.currentIndex() == 0:
+                # 从历史记录中获取
+                original_text = self.clipboard_history[current_row]
+            else:
+                # 从收藏夹中获取
+                item = self.favorites[self.current_folder][current_row]
+                original_text = item["text"] if isinstance(item, dict) else str(item)
             
             # 无论是从历史记录还是收藏夹，都将内容更新到历史记录顶部
             if original_text in self.clipboard_history:
