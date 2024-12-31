@@ -962,14 +962,14 @@ class ClipboardHistoryApp(QMainWindow):
         self.preview_window.hide()
 
     def on_favorites_reordered(self, parent, start, end, destination, row):
-        """处理收藏列表重排"""
+        """处理收藏列表重排序"""
         # 获取移动的项目
-        moved_item = self.favorites[start]
+        moved_item = self.favorites[self.current_folder][start]
         # 从原位置删除
-        self.favorites.pop(start)
+        self.favorites[self.current_folder].pop(start)
         # 插入到新位置
         new_position = row if row < start else row - 1
-        self.favorites.insert(new_position, moved_item)
+        self.favorites[self.current_folder].insert(new_position, moved_item)
         # 保存更新后的收藏列表
         self.save_favorites()
 
