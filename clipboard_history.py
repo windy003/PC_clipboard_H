@@ -933,19 +933,14 @@ class ClipboardHistoryApp(QMainWindow):
                 if '\n' in original_text or len(original_text) > 50 or description:
                     self.preview_window.set_content(original_text, description)
                     
-                    list_widget = current_list
-                    item_rect = list_widget.visualItemRect(current)
-                    global_pos = list_widget.mapToGlobal(item_rect.topRight())
+                    # 计算预览窗口位置 - 总是显示在主窗口右侧
+                    preview_x = self.x() + self.width() + 10  # 主窗口右边缘 + 10像素间距
+                    preview_y = self.y()  # 与主窗口顶部对齐
                     
+                    # 确保预览窗口不会超出屏幕右边界
                     screen = QApplication.primaryScreen().geometry()
-                    preview_x = global_pos.x() + 10
-                    preview_y = global_pos.y()
-                    
                     if preview_x + self.preview_window.width() > screen.right():
-                        preview_x = global_pos.x() - self.preview_window.width() - 10
-                    
-                    if preview_y + self.preview_window.height() > screen.bottom():
-                        preview_y = screen.bottom() - self.preview_window.height()
+                        preview_x = self.x() - self.preview_window.width() - 10  # 改为显示在主窗口左侧
                     
                     self.preview_window.move(preview_x, preview_y)
                     self.preview_window.show()
