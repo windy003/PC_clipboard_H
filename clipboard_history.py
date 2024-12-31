@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidget, 
                            QVBoxLayout, QPushButton, QWidget, QSystemTrayIcon, QMenu,
-                           QHBoxLayout, QStackedWidget, QLabel, QTextEdit, QDialog, QLineEdit, QMessageBox, QComboBox, QInputDialog)
+                           QHBoxLayout, QStackedWidget, QLabel, QTextEdit, QDialog, QLineEdit, QMessageBox, QComboBox, QInputDialog, QFrame)
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QClipboard, QIcon, QKeyEvent
 import sys
@@ -183,10 +183,14 @@ class PreviewWindow(QWidget):
                 color: #666;
                 padding: 5px;
             }
+            QFrame#line {
+                background-color: #ccc;
+            }
         """)
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(5)  # 设置组件之间的间距
         
         # 描述信息显示
         self.description_label = QLabel("描述:")
@@ -196,7 +200,17 @@ class PreviewWindow(QWidget):
         self.description_edit.setMaximumHeight(100)
         layout.addWidget(self.description_edit)
         
-        # 内容显示
+        # 添加分界线
+        self.separator = QFrame()
+        self.separator.setObjectName("line")
+        self.separator.setFrameShape(QFrame.Shape.HLine)
+        self.separator.setFrameShadow(QFrame.Shadow.Sunken)
+        self.separator.setFixedHeight(2)
+        layout.addWidget(self.separator)
+        
+        # 内容标题和显示
+        self.content_label = QLabel("内容信息:")
+        layout.addWidget(self.content_label)
         self.text_edit = QTextEdit()
         self.text_edit.setReadOnly(True)
         layout.addWidget(self.text_edit)
@@ -210,9 +224,11 @@ class PreviewWindow(QWidget):
             self.description_label.show()
             self.description_edit.show()
             self.description_edit.setText(description)
+            self.separator.show()
         else:
             self.description_label.hide()
             self.description_edit.hide()
+            self.separator.hide()
 
 class EditItemDialog(QDialog):
     """编辑条目对话框"""
