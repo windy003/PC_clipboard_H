@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidget, 
                            QVBoxLayout, QPushButton, QWidget, QSystemTrayIcon, QMenu,
-                           QHBoxLayout, QStackedWidget, QLabel, QTextEdit, QDialog, QLineEdit, QMessageBox, QComboBox, QInputDialog, QFrame)
+                           QHBoxLayout, QStackedWidget, QLabel, QTextEdit, QDialog, QLineEdit, QMessageBox, QComboBox, QInputDialog, QFrame, QScrollArea)
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
 from PyQt6.QtGui import QClipboard, QIcon, QKeyEvent
 import sys
@@ -186,19 +186,62 @@ class PreviewWindow(QWidget):
             QFrame#line {
                 background-color: #ccc;
             }
+            QScrollBar:vertical {
+                border: none;
+                background: #f0f0f0;
+                width: 10px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #ccc;
+                border-radius: 5px;
+                min-height: 20px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar:horizontal {
+                border: none;
+                background: #f0f0f0;
+                height: 10px;
+                margin: 0px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #ccc;
+                border-radius: 5px;
+                min-width: 20px;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0px;
+            }
         """)
         
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(5)  # 设置组件之间的间距
+        layout.setSpacing(5)
+        
+        # 创建一个滚动区域
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        
+        # 创建一个容器widget来放置所有内容
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(5)
         
         # 描述信息显示
         self.description_label = QLabel("描述:")
-        layout.addWidget(self.description_label)
+        container_layout.addWidget(self.description_label)
         self.description_edit = QTextEdit()
         self.description_edit.setReadOnly(True)
         self.description_edit.setMaximumHeight(100)
-        layout.addWidget(self.description_edit)
+        self.description_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.description_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        container_layout.addWidget(self.description_edit)
         
         # 添加分界线
         self.separator = QFrame()
@@ -206,17 +249,26 @@ class PreviewWindow(QWidget):
         self.separator.setFrameShape(QFrame.Shape.HLine)
         self.separator.setFrameShadow(QFrame.Shadow.Sunken)
         self.separator.setFixedHeight(2)
-        layout.addWidget(self.separator)
+        container_layout.addWidget(self.separator)
         
         # 内容标题和显示
         self.content_label = QLabel("内容信息:")
-        layout.addWidget(self.content_label)
+        container_layout.addWidget(self.content_label)
         self.text_edit = QTextEdit()
         self.text_edit.setReadOnly(True)
-        layout.addWidget(self.text_edit)
+        self.text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.text_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        container_layout.addWidget(self.text_edit)
+        
+        # 设置弹性空间
+        container_layout.addStretch()
+        
+        # 将容器放入滚动区域
+        scroll_area.setWidget(container)
+        layout.addWidget(scroll_area)
         
         self.setMinimumSize(300, 200)
-        self.setMaximumSize(400, 400)
+        self.setMaximumSize(400, 600)  # 增加最大高度
     
     def set_content(self, text, description=""):
         self.text_edit.setText(text)
