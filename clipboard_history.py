@@ -133,6 +133,14 @@ class DescriptionDialog(QDialog):
         
         layout = QVBoxLayout(self)
         
+        # 描述信息编辑框 - 添加 Alt+D 快捷键
+        description_label = QLabel("描述信息(&D):")
+        layout.addWidget(description_label)
+        self.description_edit = QTextEdit()
+        self.description_edit.setPlainText(description)
+        layout.addWidget(self.description_edit)
+        description_label.setBuddy(self.description_edit)
+        
         # 显示条目内容（只读）- 添加 Alt+T 快捷键
         content_label = QLabel("条目内容(&T):")  # 使用 & 标记快捷键字母
         layout.addWidget(content_label)
@@ -142,14 +150,6 @@ class DescriptionDialog(QDialog):
         self.content_text.setMaximumHeight(100)
         layout.addWidget(self.content_text)
         content_label.setBuddy(self.content_text)  # 将标签与文本框关联
-        
-        # 描述信息编辑框 - 添加 Alt+D 快捷键
-        description_label = QLabel("描述信息(&D):")
-        layout.addWidget(description_label)
-        self.description_edit = QTextEdit()
-        self.description_edit.setPlainText(description)
-        layout.addWidget(self.description_edit)
-        description_label.setBuddy(self.description_edit)
         
         # 按钮布局
         button_layout = QHBoxLayout()
@@ -188,11 +188,6 @@ class PreviewWindow(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         
-        # 内容显示
-        self.text_edit = QTextEdit()
-        self.text_edit.setReadOnly(True)
-        layout.addWidget(self.text_edit)
-        
         # 描述信息显示
         self.description_label = QLabel("描述:")
         layout.addWidget(self.description_label)
@@ -200,6 +195,11 @@ class PreviewWindow(QWidget):
         self.description_edit.setReadOnly(True)
         self.description_edit.setMaximumHeight(100)
         layout.addWidget(self.description_edit)
+        
+        # 内容显示
+        self.text_edit = QTextEdit()
+        self.text_edit.setReadOnly(True)
+        layout.addWidget(self.text_edit)
         
         self.setMinimumSize(300, 200)
         self.setMaximumSize(400, 400)
