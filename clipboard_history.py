@@ -455,8 +455,7 @@ class ClipboardHistoryApp(QMainWindow):
         # 双击列表项也触发粘贴
         self.history_list.itemDoubleClicked.connect(self.paste_selected)
         
-        # 为列表控件添加 ESC 键支持
-        self.history_list.keyPressEvent = self.list_key_press
+        
         
         # 创建预览窗口
         self.preview_window = PreviewWindow()
