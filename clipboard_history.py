@@ -319,7 +319,7 @@ class ClipboardHistoryApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("剪贴板历史")
-        self.setGeometry(100, 100, 400, 300)
+        
         
         # 设置窗口图标
         icon_path = get_resource_path("icon.ico")
