@@ -810,7 +810,7 @@ class ClipboardHistoryApp(QMainWindow):
             # 获取原始文本而不是截断的文本
             original_text = self.clipboard_history[self.history_list.currentRow()]
             print(f"当前选中: {original_text}")  # 调试信息
-            add_to_favorites = menu.addAction("添加到收藏")
+            add_to_favorites = menu.addAction("添加到收藏(&A)")  # Alt+A
             action = menu.exec(self.history_list.mapToGlobal(position))
             
             if action == add_to_favorites:
@@ -1019,16 +1019,16 @@ class ClipboardHistoryApp(QMainWindow):
             favorite_item = self.favorites[self.current_folder][current_row]
             original_text = favorite_item["text"]
             
-            edit_action = menu.addAction("编辑内容")
-            edit_description = menu.addAction("编辑描述")
-            new_folder = menu.addAction("新建收藏夹...")
+            edit_action = menu.addAction("编辑内容(&E)")  # Alt+E
+            edit_description = menu.addAction("编辑描述(&M)")  # Alt+M 
+            new_folder = menu.addAction("新建收藏夹(&N)...")  # Alt+N
             
-            move_menu = menu.addMenu("移动到收藏夹")
+            move_menu = menu.addMenu("移动到收藏夹(&V)")  # Alt+V
             for folder in self.favorites.keys():
                 if folder != self.current_folder:
                     move_menu.addAction(folder)
             
-            delete_action = menu.addAction("删除")
+            delete_action = menu.addAction("删除(&D)")  # Alt+D
             
             action = menu.exec(self.favorites_list.mapToGlobal(position))
             
