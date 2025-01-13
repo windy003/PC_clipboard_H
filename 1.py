@@ -576,8 +576,8 @@ class ClipboardHistoryApp(QMainWindow):
         # 添加分隔线
         tray_menu.addSeparator()
         
-        # 添加退出动作
-        quit_action = tray_menu.addAction("退出")
+        # 添加退出动作 - 添加 Alt+X 快捷键
+        quit_action = tray_menu.addAction("退出(&X)")
         quit_action.triggered.connect(QApplication.quit)
         
         # 添加设置选项
