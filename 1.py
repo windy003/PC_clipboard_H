@@ -637,6 +637,31 @@ class ClipboardHistoryApp(QMainWindow):
             self.history_list.setFocus()
         elif event.key() == Qt.Key.Key_Delete and self.stacked_widget.currentIndex() == 1:
             self.delete_favorite()
+        # 处理 Ctrl+C
+        elif event.key() == Qt.Key.Key_C and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
+            current_row = current_list.currentRow()
+            if current_row >= 0:
+                if self.stacked_widget.currentIndex() == 0:
+                    # 从历史记录获取完整文本
+                    original_text = self.clipboard_history[current_row]
+                    # 从原位置移除
+                    self.clipboard_history.pop(current_row)
+                    self.history_list.takeItem(current_row)
+                    # 插入到顶部
+                    self.clipboard_history.insert(0, original_text)
+                    truncated_text = self.truncate_text(original_text)
+                    self.history_list.insertItem(0, truncated_text)
+                    # 更新编号
+                    self.update_list_numbers(self.history_list)
+                    # 保存历史记录
+                    self.save_history()
+                else:
+                    # 从收藏夹获取完整文本
+                    item = self.favorites[self.current_folder][current_row]
+                    original_text = item["text"] if isinstance(item, dict) else str(item)
+                # 复制到剪贴板
+                self.clipboard.setText(original_text)
         # 修改为 Alt+F 快捷键
         elif (event.modifiers() == Qt.KeyboardModifier.AltModifier and 
               event.key() == Qt.Key.Key_F and 
