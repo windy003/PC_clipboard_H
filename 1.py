@@ -394,18 +394,29 @@ class ClipboardHistoryApp(QMainWindow):
         self.folder_combo = QComboBox()
         self.folder_combo.currentTextChanged.connect(self.change_folder)
         
-        # 添加重命名按钮 - 修改这一行，添加快捷键
-        self.rename_folder_btn = QPushButton("重命名(&R)")  # 改为 Alt+R
-        self.rename_folder_btn.clicked.connect(self.rename_current_folder)
-        self.rename_folder_btn.setFixedWidth(60)  # 设置按钮宽度
-        
         # 修改收藏夹布局
         folder_layout = QHBoxLayout()
-        folder_hint = QLabel("(Alt+C)")  # 修改提示文本
-        folder_hint.setStyleSheet("color: gray;")
         folder_layout.addWidget(self.folder_combo)
+        
+        # 更换按钮 - 移动到下拉菜单和重命名之间
+        self.change_folder_btn = QPushButton("更换(&C)")
+        self.change_folder_btn.clicked.connect(lambda: self.folder_combo.showPopup())
+        self.change_folder_btn.setFixedWidth(60)
+        
+        # 重命名按钮
+        self.rename_folder_btn = QPushButton("重命名(&R)")
+        self.rename_folder_btn.clicked.connect(self.rename_current_folder)
+        self.rename_folder_btn.setFixedWidth(60)
+        
+        # 删除按钮
+        self.delete_folder_btn = QPushButton("删除(&D)")
+        self.delete_folder_btn.clicked.connect(self.delete_current_folder)
+        self.delete_folder_btn.setFixedWidth(60)
+        
+        # 按新顺序添加按钮
+        folder_layout.addWidget(self.change_folder_btn)
         folder_layout.addWidget(self.rename_folder_btn)
-        folder_layout.addWidget(folder_hint)
+        folder_layout.addWidget(self.delete_folder_btn)
         top_layout.addLayout(folder_layout)
         
         # 存储收藏夹数据
@@ -590,7 +601,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/1/22-01")
+        version_action = tray_menu.addAction("版本: 2025/1/22-02")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
@@ -1221,6 +1232,38 @@ class ClipboardHistoryApp(QMainWindow):
             self.save_favorites()
             
             QMessageBox.information(self, "成功", "收藏夹重命名成功！")
+
+    def delete_current_folder(self):
+        """删除当前收藏夹"""
+        if self.current_folder == "默认收藏夹":
+            QMessageBox.warning(self, "警告", "默认收藏夹不能删除！")
+            return
+            
+        reply = QMessageBox.question(
+            self,
+            "确认删除",
+            f"确定要删除收藏夹 '{self.current_folder}' 吗？\n此操作不可恢复！",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # 删除收藏夹
+            del self.favorites[self.current_folder]
+            
+            # 从下拉菜单中移除
+            current_index = self.folder_combo.currentIndex()
+            self.folder_combo.removeItem(current_index)
+            
+            # 切换到默认收藏夹
+            self.current_folder = "默认收藏夹"
+            self.folder_combo.setCurrentText("默认收藏夹")
+            self.change_folder("默认收藏夹")
+            
+            # 保存更改
+            self.save_favorites()
+            
+            QMessageBox.information(self, "成功", "收藏夹已删除！")
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径"""
