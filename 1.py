@@ -601,7 +601,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/1/22-02")
+        version_action = tray_menu.addAction("版本: 2025/1/22-03")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
@@ -805,16 +805,26 @@ class ClipboardHistoryApp(QMainWindow):
     def show_window(self):
         """显示窗口"""
         print("正在显示窗口")  # 调试信息
-        # 确保窗口显示在屏幕中央
-        screen = QApplication.primaryScreen().geometry()
-        self.move(
-            screen.center().x() - self.width() // 2,
-            screen.center().y() - self.height() // 2
-        )
         
-        # 显示时默认显示历史记录面板
-        self.stacked_widget.setCurrentIndex(0)
-        self.panel_label.setText("历史记录")
+        # 获取屏幕尺寸
+        screen = QApplication.primaryScreen().geometry()
+        
+        # 计算所需的总宽度（主窗口 + 间距 + 预览窗口）
+        main_window_width = self.width()
+        preview_window_width = 400  # 预览窗口的最大宽度
+        spacing = 10  # 窗口之间的间距
+        total_width = main_window_width + spacing + preview_window_width
+        
+        # 计算主窗口的x坐标，使其居中且留出预览窗口的空间
+        x = screen.center().x() - total_width // 2
+        y = screen.center().y() - self.height() // 2
+        
+        # 确保窗口不会超出屏幕左边界
+        if x < 0:
+            x = 0
+        
+        # 移动主窗口到计算出的位置
+        self.move(x, y)
         
         # 临时设置置顶标志
         self.setWindowFlags(
@@ -985,8 +995,19 @@ class ClipboardHistoryApp(QMainWindow):
                 if '\n' in original_text or len(original_text) > 50 or description:
                     self.preview_window.set_content(original_text, description)
                     
-                    # 简化后的预览窗口位置设置 - 固定在主窗口右侧
-                    preview_x = self.x() + self.width() + 10
+                    # 计算预览窗口的位置
+                    screen = QApplication.primaryScreen().geometry()
+                    preview_width = self.preview_window.width()
+                    
+                    # 计算预览窗口的理想x坐标
+                    ideal_x = self.x() + self.width() + 10
+                    
+                    # 如果预览窗口会超出屏幕右边界，则将其放在主窗口左侧
+                    if ideal_x + preview_width > screen.right():
+                        preview_x = self.x() - preview_width - 10
+                    else:
+                        preview_x = ideal_x
+                    
                     preview_y = self.y()
                     
                     self.preview_window.move(preview_x, preview_y)
