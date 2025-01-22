@@ -395,13 +395,13 @@ class ClipboardHistoryApp(QMainWindow):
         self.folder_combo.currentTextChanged.connect(self.change_folder)
         
         # 添加重命名按钮 - 修改这一行，添加快捷键
-        self.rename_folder_btn = QPushButton("重命名(&C)")  # 添加 &C 来设置 Alt+C 快捷键
+        self.rename_folder_btn = QPushButton("重命名(&R)")  # 改为 Alt+R
         self.rename_folder_btn.clicked.connect(self.rename_current_folder)
         self.rename_folder_btn.setFixedWidth(60)  # 设置按钮宽度
         
         # 修改收藏夹布局
         folder_layout = QHBoxLayout()
-        folder_hint = QLabel("(Alt+F)")
+        folder_hint = QLabel("(Alt+C)")  # 修改提示文本
         folder_hint.setStyleSheet("color: gray;")
         folder_layout.addWidget(self.folder_combo)
         folder_layout.addWidget(self.rename_folder_btn)
@@ -590,7 +590,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/1/22")
+        version_action = tray_menu.addAction("版本: 2025/1/22-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
@@ -678,9 +678,9 @@ class ClipboardHistoryApp(QMainWindow):
                     original_text = item["text"] if isinstance(item, dict) else str(item)
                 # 复制到剪贴板
                 self.clipboard.setText(original_text)
-        # 修改为 Alt+F 快捷键
+        # 修改为 Alt+C 快捷键
         elif (event.modifiers() == Qt.KeyboardModifier.AltModifier and 
-              event.key() == Qt.Key.Key_F and 
+              event.key() == Qt.Key.Key_C and 
               self.stacked_widget.currentIndex() == 1):
             # 打开收藏夹下拉菜单
             self.folder_combo.showPopup()
