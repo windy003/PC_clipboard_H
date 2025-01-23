@@ -11,24 +11,46 @@ import keyboard
 # 修改热键线程的实现
 class HotkeyThread(QThread):
     triggered = pyqtSignal()
+    error = pyqtSignal(str)  # 添加错误信号
 
     def __init__(self, hotkey='ctrl+alt+z'):
         super().__init__()
         self.running = True
         self.hotkey = hotkey
         self.current_hotkey = None
+        self.retry_count = 0
+        self.max_retries = 3
         
     def run(self):
-        try:
-            # 使用 keyboard 库注册热键组合
-            self.current_hotkey = keyboard.add_hotkey(self.hotkey, self.on_hotkey)
-            print(f"热键已注册: {self.hotkey}")
-            
-            while self.running:
-                self.msleep(100)
+        while self.running:
+            try:
+                if self.current_hotkey:
+                    keyboard.remove_hotkey(self.current_hotkey)
+                    
+                # 重新注册热键
+                self.current_hotkey = keyboard.add_hotkey(self.hotkey, self.on_hotkey)
+                print(f"热键已注册: {self.hotkey}")
+                self.retry_count = 0  # 重置重试计数
                 
-        except Exception as e:
-            print(f"热键注册错误: {e}")
+                # 主循环
+                while self.running:
+                    self.msleep(100)
+                    # 定期检查热键是否还有效
+                    if self.retry_count >= self.max_retries:
+                        raise Exception("热键失效")
+                        
+            except Exception as e:
+                print(f"热键错误: {e}")
+                self.error.emit(str(e))
+                self.retry_count += 1
+                
+                if self.retry_count < self.max_retries:
+                    print(f"尝试重新注册热键 (第 {self.retry_count} 次)")
+                    self.msleep(1000)  # 等待1秒后重试
+                    continue
+                else:
+                    print("热键重试次数已达上限")
+                    break
 
     def on_hotkey(self):
         print("热键被触发")
@@ -39,6 +61,7 @@ class HotkeyThread(QThread):
         try:
             if self.current_hotkey:
                 keyboard.remove_hotkey(self.current_hotkey)
+                self.current_hotkey = None
             print("热键已清理")
         except Exception as e:
             print(f"清理热键时出错: {e}")
@@ -452,6 +475,7 @@ class ClipboardHistoryApp(QMainWindow):
         # 创建并启动热键线程
         self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+alt+z'))
         self.hotkey_thread.triggered.connect(self.show_window)
+        self.hotkey_thread.error.connect(self.handle_hotkey_error)  # 连接错误处理
         self.hotkey_thread.start()
         
         # 创建系统托盘图标 (只调用一次)
@@ -600,8 +624,15 @@ class ClipboardHistoryApp(QMainWindow):
         # 添加分隔线
         tray_menu.addSeparator()
         
+        # 添加重置热键选项（添加 Alt+C 快捷键）
+        reset_hotkey = tray_menu.addAction("重置热键(&C)")  # 添加 &C 来设置 Alt+C 快捷键
+        reset_hotkey.triggered.connect(self.handle_hotkey_error)
+        
+        # 添加分隔线
+        tray_menu.addSeparator()
+        
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/1/22-03")
+        version_action = tray_menu.addAction("版本: 2025/1/23-00")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
@@ -1285,6 +1316,17 @@ class ClipboardHistoryApp(QMainWindow):
             self.save_favorites()
             
             QMessageBox.information(self, "成功", "收藏夹已删除！")
+
+    def handle_hotkey_error(self, error_msg):
+        """处理热键错误"""
+        print(f"热键错误，正在重新初始化: {error_msg}")
+        # 重新初始化热键线程
+        self.hotkey_thread.stop()
+        self.hotkey_thread.wait()
+        self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+alt+z'))
+        self.hotkey_thread.triggered.connect(self.show_window)
+        self.hotkey_thread.error.connect(self.handle_hotkey_error)
+        self.hotkey_thread.start()
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径"""
