@@ -39,6 +39,11 @@ class HotkeyThread(QThread):
                     if self.retry_count >= self.max_retries:
                         raise Exception("热键失效")
                         
+                    # 检查热键是否仍然有效
+                    if not keyboard.is_pressed(self.hotkey):
+                        print("热键失效，尝试重新注册")
+                        raise Exception("热键失效")
+                        
             except Exception as e:
                 print(f"热键错误: {e}")
                 self.error.emit(str(e))
@@ -632,7 +637,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/1/23-00")
+        version_action = tray_menu.addAction("版本: 2025/1/25-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
