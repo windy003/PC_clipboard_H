@@ -634,7 +634,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/1/26-00")
+        version_action = tray_menu.addAction("版本: 2025/1/26-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
@@ -839,9 +839,9 @@ class ClipboardHistoryApp(QMainWindow):
         """显示窗口"""
         print("正在显示窗口")  # 调试信息
         
-        # 确保切换到历史记录面板
-        self.stacked_widget.setCurrentIndex(0)
-        self.panel_label.setText("历史记录")
+        # 切换到收藏面板
+        self.stacked_widget.setCurrentIndex(1)
+        self.panel_label.setText("收藏夹")
         
         # 获取屏幕尺寸
         screen = QApplication.primaryScreen().geometry()
@@ -873,7 +873,7 @@ class ClipboardHistoryApp(QMainWindow):
         self.show()
         self.raise_()
         self.activateWindow()
-        self.history_list.setFocus()
+        self.favorites_list.setFocus()  # 修改这里，设置焦点到收藏列表
 
     def __del__(self):
         """确保程序退出时清理热键"""
