@@ -798,6 +798,7 @@ class ClipboardHistoryApp(QMainWindow):
                     self.current_folder = "默认收藏夹"
                     self.folder_combo.setCurrentText("默认收藏夹")
                     self.change_folder("默认收藏夹")
+                    self.save_favorites()
 
     def paste_selected(self):
         """复制选中项并模拟粘贴操作"""
