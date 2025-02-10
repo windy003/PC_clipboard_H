@@ -634,7 +634,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/2/10-01")
+        version_action = tray_menu.addAction("版本: 2025/2/11-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
@@ -1070,6 +1070,8 @@ class ClipboardHistoryApp(QMainWindow):
         # 插入到新位置
         new_position = row if row < start else row - 1
         self.favorites[self.current_folder].insert(new_position, moved_item)
+        # 更新列表项编号
+        self.update_list_numbers(self.favorites_list)
         # 保存更新后的收藏列表
         self.save_favorites()
 
