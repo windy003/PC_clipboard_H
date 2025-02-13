@@ -529,6 +529,9 @@ class ClipboardHistoryApp(QMainWindow):
             }
         """)
 
+        # 添加删除历史记录
+        self.delete_history = []
+
     def check_clipboard(self):
         current_text = self.clipboard.text()
         if current_text != self.last_text:
@@ -634,7 +637,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/2/13-01")
+        version_action = tray_menu.addAction("版本: 2025/2/13-02")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
@@ -697,6 +700,10 @@ class ClipboardHistoryApp(QMainWindow):
             self.history_list.setFocus()
         elif event.key() == Qt.Key.Key_Delete and self.stacked_widget.currentIndex() == 1:
             self.delete_favorite()
+        elif (event.key() == Qt.Key.Key_Z and 
+              event.modifiers() & Qt.KeyboardModifier.ControlModifier and 
+              self.stacked_widget.currentIndex() == 1):
+            self.undo_delete()
         # 处理 Ctrl+C
         elif event.key() == Qt.Key.Key_C and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
             current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
@@ -772,6 +779,14 @@ class ClipboardHistoryApp(QMainWindow):
         """删除选中的收藏项"""
         current_row = self.favorites_list.currentRow()
         if current_row >= 0:  # 确保有选中的项目
+            # 保存删除信息用于撤销
+            deleted_item = {
+                'folder': self.current_folder,
+                'item': self.favorites[self.current_folder][current_row],
+                'position': current_row
+            }
+            self.delete_history.append(deleted_item)
+            
             # 从数据中删除
             self.favorites[self.current_folder].pop(current_row)
             # 从列表控件中删除
@@ -799,6 +814,39 @@ class ClipboardHistoryApp(QMainWindow):
                     self.folder_combo.setCurrentText("默认收藏夹")
                     self.change_folder("默认收藏夹")
                     self.save_favorites()
+
+    def undo_delete(self):
+        """撤销删除操作"""
+        if self.delete_history:
+            # 获取最后一次删除的信息
+            deleted_item = self.delete_history.pop()
+            folder = deleted_item['folder']
+            item = deleted_item['item']
+            position = deleted_item['position']
+            
+            # 确保文件夹存在
+            if folder not in self.favorites:
+                self.favorites[folder] = []
+                self.folder_combo.addItem(folder)
+            
+            # 如果不在对应的收藏夹，先切换过去
+            if self.current_folder != folder:
+                self.current_folder = folder
+                self.folder_combo.setCurrentText(folder)
+                self.change_folder(folder)
+            
+            # 恢复删除的项目
+            self.favorites[folder].insert(position, item)
+            truncated_text = self.truncate_text(item['text'])
+            self.favorites_list.insertItem(position, truncated_text)
+            
+            # 更新编号
+            self.update_list_numbers(self.favorites_list)
+            # 保存更改
+            self.save_favorites()
+            
+            # 选中恢复的项目
+            self.favorites_list.setCurrentRow(position)
 
     def paste_selected(self):
         """复制选中项并模拟粘贴操作"""
