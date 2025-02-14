@@ -153,8 +153,9 @@ class DescriptionDialog(QDialog):
     """描述信息编辑对话框"""
     def __init__(self, parent=None, text="", description=""):
         super().__init__(parent)
-        self.setWindowTitle("编辑描述信息")
+        self.setWindowTitle("编辑内容和描述")
         self.setFixedSize(400, 300)
+        self.original_geometry = None  # 存储原始窗口大小和位置
         
         layout = QVBoxLayout(self)
         
@@ -166,28 +167,46 @@ class DescriptionDialog(QDialog):
         layout.addWidget(self.description_edit)
         description_label.setBuddy(self.description_edit)
         
-        # 显示条目内容（只读）- 添加 Alt+T 快捷键
-        content_label = QLabel("条目内容(&T):")  # 使用 & 标记快捷键字母
+        # 内容编辑框 - 添加 Alt+T 快捷键
+        content_label = QLabel("条目内容(&T):")
         layout.addWidget(content_label)
         self.content_text = QTextEdit()
         self.content_text.setPlainText(text)
-        self.content_text.setReadOnly(True)
-        self.content_text.setMaximumHeight(100)
         layout.addWidget(self.content_text)
-        content_label.setBuddy(self.content_text)  # 将标签与文本框关联
+        content_label.setBuddy(self.content_text)
         
         # 按钮布局
         button_layout = QHBoxLayout()
-        self.confirm_button = QPushButton("确认(&O)")  # Alt+O
+        
+        # 全屏按钮
+        self.fullscreen_button = QPushButton("全屏(&F)")
+        self.fullscreen_button.clicked.connect(self.toggle_fullscreen)
+        button_layout.addWidget(self.fullscreen_button)
+        
+        self.confirm_button = QPushButton("确认(&O)")
         self.confirm_button.clicked.connect(self.accept)
-        self.cancel_button = QPushButton("取消(&C)")   # Alt+C
+        self.cancel_button = QPushButton("取消(&C)")
         self.cancel_button.clicked.connect(self.reject)
         button_layout.addWidget(self.confirm_button)
         button_layout.addWidget(self.cancel_button)
         layout.addLayout(button_layout)
     
+    def toggle_fullscreen(self):
+        if self.isFullScreen():
+            self.showNormal()
+            if self.original_geometry:
+                self.setGeometry(self.original_geometry)
+            self.fullscreen_button.setText("全屏(&F)")
+        else:
+            self.original_geometry = self.geometry()
+            self.showFullScreen()
+            self.fullscreen_button.setText("退出全屏(&F)")
+    
     def get_description(self):
         return self.description_edit.toPlainText()
+    
+    def get_content(self):
+        return self.content_text.toPlainText()
 
 class PreviewWindow(QWidget):
     """悬浮预览窗口"""
@@ -637,7 +656,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/2/13-02")
+        version_action = tray_menu.addAction("版本: 2025/2/14-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
@@ -1180,8 +1199,7 @@ class ClipboardHistoryApp(QMainWindow):
             favorite_item = self.favorites[self.current_folder][current_row]
             original_text = favorite_item["text"]
             
-            edit_action = menu.addAction("编辑内容(&E)")  # Alt+E
-            edit_description = menu.addAction("编辑描述(&M)")  # Alt+M 
+            edit_action = menu.addAction("编辑内容和描述(&E)")  # Alt+E
             new_folder = menu.addAction("新建收藏夹(&N)...")  # Alt+N
             
             move_menu = menu.addMenu("移动到收藏夹(&V)")  # Alt+V
@@ -1195,9 +1213,7 @@ class ClipboardHistoryApp(QMainWindow):
             
             if action:
                 if action == edit_action:
-                    self.edit_favorite_item(current_row)
-                elif action == edit_description:
-                    self.edit_favorite_description(current_row)
+                    self.edit_favorite_content_and_description(current_row)
                 elif action == new_folder:
                     self.create_new_folder(original_text)
                 elif action == delete_action:
@@ -1261,47 +1277,29 @@ class ClipboardHistoryApp(QMainWindow):
                 self.favorites_list.addItem(truncated_text)
             self.update_list_numbers(self.favorites_list)
 
-    def edit_favorite_item(self, row):
-        """编辑收藏条目"""
-        if 0 <= row < len(self.favorites[self.current_folder]):
-            # 获取原始条目
-            item = self.favorites[self.current_folder][row]
-            # 确保使用字典格式，获取文本内容
-            original_text = item["text"] if isinstance(item, dict) else str(item)
-            
-            dialog = EditItemDialog(self, original_text)
-            
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                new_text = dialog.get_text()
-                if new_text and new_text != original_text:
-                    # 更新收藏夹中的文本
-                    if isinstance(item, dict):
-                        item["text"] = new_text
-                    else:
-                        # 如果是旧格式，转换为新格式
-                        self.favorites[self.current_folder][row] = {
-                            "text": new_text,
-                            "description": ""
-                        }
-                    # 更新显示的文本
-                    truncated_text = self.truncate_text(new_text)
-                    self.favorites_list.item(row).setText(f"{row+1}. {truncated_text}")
-                    # 保存更改
-                    self.save_favorites()
-
-    def edit_favorite_description(self, row):
-        """编辑收藏条目的描述信息"""
+    def edit_favorite_content_and_description(self, row):
+        """编辑收藏条目的内容和描述"""
         if 0 <= row < len(self.favorites[self.current_folder]):
             favorite_item = self.favorites[self.current_folder][row]
             dialog = DescriptionDialog(
                 self,
                 text=favorite_item["text"],
-                description=favorite_item["description"]
+                description=favorite_item.get("description", "")
             )
             
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 new_description = dialog.get_description()
+                new_content = dialog.get_content()
+                
+                # 更新收藏夹中的内容
+                favorite_item["text"] = new_content
                 favorite_item["description"] = new_description
+                
+                # 更新显示的文本
+                truncated_text = self.truncate_text(new_content)
+                self.favorites_list.item(row).setText(f"{row+1}. {truncated_text}")
+                
+                # 保存更改
                 self.save_favorites()
 
     # 添加重命名收藏夹的方法
