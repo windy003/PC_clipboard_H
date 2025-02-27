@@ -7,6 +7,7 @@ import sys
 import json
 import os
 import keyboard
+import time
 
 # 修改热键线程的实现
 class HotkeyThread(QThread):
@@ -20,6 +21,7 @@ class HotkeyThread(QThread):
         self.current_hotkey = None
         self.retry_count = 0
         self.max_retries = 3
+        self.last_check_time = 0
         
     def run(self):
         while self.running:
@@ -31,13 +33,29 @@ class HotkeyThread(QThread):
                 self.current_hotkey = keyboard.add_hotkey(self.hotkey, self.on_hotkey)
                 print(f"热键已注册: {self.hotkey}")
                 self.retry_count = 0  # 重置重试计数
+                self.last_check_time = time.time()  # 记录注册时间
                 
                 # 主循环
                 while self.running:
                     self.msleep(100)
                     
-                    # 移除对keyboard.is_pressed的检查
-                    # 只在热键回调失败时重试
+                    # 定期检查热键是否仍然有效（每60秒检查一次）
+                    current_time = time.time()
+                    if current_time - self.last_check_time > 60:
+                        print("定期检查热键状态...")
+                        self.last_check_time = current_time
+                        
+                        # 尝试重新注册热键以确保其有效
+                        try:
+                            keyboard.remove_hotkey(self.current_hotkey)
+                            self.current_hotkey = keyboard.add_hotkey(self.hotkey, self.on_hotkey)
+                            print(f"热键已刷新: {self.hotkey}")
+                        except Exception as e:
+                            print(f"热键刷新错误: {e}")
+                            self.error.emit(str(e))
+                            break  # 跳出内循环，进入外循环重试
+                    
+                    # 如果重试次数达到上限，跳出循环
                     if self.retry_count >= self.max_retries:
                         break
                         
@@ -52,7 +70,8 @@ class HotkeyThread(QThread):
                     continue
                 else:
                     print("热键重试次数已达上限")
-                    break
+                    self.msleep(5000)  # 等待5秒后重置重试计数
+                    self.retry_count = 0
 
     def on_hotkey(self):
         print("热键被触发")
@@ -1372,16 +1391,30 @@ class ClipboardHistoryApp(QMainWindow):
             
             QMessageBox.information(self, "成功", "收藏夹已删除！")
 
-    def handle_hotkey_error(self, error_msg):
+    def handle_hotkey_error(self, error_msg=""):
         """处理热键错误"""
         print(f"热键错误，正在重新初始化: {error_msg}")
         # 重新初始化热键线程
-        self.hotkey_thread.stop()
-        self.hotkey_thread.wait()
+        try:
+            self.hotkey_thread.stop()
+            self.hotkey_thread.wait(1000)  # 等待最多1秒
+            
+            # 如果线程仍在运行，强制终止
+            if self.hotkey_thread.isRunning():
+                print("强制终止热键线程")
+                self.hotkey_thread.terminate()
+                self.hotkey_thread.wait()
+        except Exception as e:
+            print(f"停止热键线程时出错: {e}")
+        
+        # 创建新的热键线程
         self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+alt+z'))
         self.hotkey_thread.triggered.connect(self.show_window)
         self.hotkey_thread.error.connect(self.handle_hotkey_error)
         self.hotkey_thread.start()
+        
+        # 显示通知
+        self.tray_icon.showMessage("热键已重置", f"快捷键 {self.config.get('hotkey', 'ctrl+alt+z')} 已重新注册", QSystemTrayIcon.MessageIcon.Information, 3000)
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径"""
