@@ -675,7 +675,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/2/28-01")
+        version_action = tray_menu.addAction("版本: 2025/3/1-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
@@ -736,8 +736,11 @@ class ClipboardHistoryApp(QMainWindow):
             self.stacked_widget.setCurrentIndex(0)
             self.panel_label.setText("历史记录")
             self.history_list.setFocus()
-        elif event.key() == Qt.Key.Key_Delete and self.stacked_widget.currentIndex() == 1:
-            self.delete_favorite()
+        elif event.key() == Qt.Key.Key_Delete:
+            if self.stacked_widget.currentIndex() == 1:
+                self.delete_favorite()
+            else:
+                self.delete_history_item()
         elif (event.key() == Qt.Key.Key_Z and 
               event.modifiers() & Qt.KeyboardModifier.ControlModifier and 
               self.stacked_widget.currentIndex() == 1):
@@ -996,12 +999,23 @@ class ClipboardHistoryApp(QMainWindow):
             # 获取原始文本而不是截断的文本
             original_text = self.clipboard_history[self.history_list.currentRow()]
             print(f"当前选中: {original_text}")  # 调试信息
+            
+            # 添加编辑选项
+            edit_action = menu.addAction("编辑(&E)")  # Alt+E
             add_to_favorites = menu.addAction("添加到收藏(&A)")  # Alt+A
+            delete_action = menu.addAction("删除(&D)")  # Alt+D
+            
             action = menu.exec(self.history_list.mapToGlobal(position))
             
             if action == add_to_favorites:
                 print("选择了加到收藏选项")  # 调试信息
                 self.add_to_favorites(original_text)
+            elif action == edit_action:
+                print("选择了编辑选项")  # 调试信息
+                self.edit_history_item(self.history_list.currentRow())
+            elif action == delete_action:
+                print("选择了删除选项")  # 调试信息
+                self.delete_history_item()
 
     def add_to_favorites(self, text):
         """添加文本到当前收藏夹"""
@@ -1415,6 +1429,38 @@ class ClipboardHistoryApp(QMainWindow):
         
         # 显示通知
         self.tray_icon.showMessage("热键已重置", f"快捷键 {self.config.get('hotkey', 'ctrl+alt+z')} 已重新注册", QSystemTrayIcon.MessageIcon.Information, 3000)
+
+    def delete_history_item(self):
+        """删除选中的历史条目"""
+        current_row = self.history_list.currentRow()
+        if current_row >= 0:  # 确保有选中的项目
+            # 从数据中删除
+            self.clipboard_history.pop(current_row)
+            # 从列表控件中删除
+            self.history_list.takeItem(current_row)
+            # 更新编号
+            self.update_list_numbers(self.history_list)
+            # 保存更改
+            self.save_history()
+
+    def edit_history_item(self, row):
+        """编辑历史条目的内容"""
+        if 0 <= row < len(self.clipboard_history):
+            original_text = self.clipboard_history[row]
+            dialog = EditItemDialog(self, text=original_text)
+            
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                new_text = dialog.get_text()
+                
+                # 更新历史记录中的内容
+                self.clipboard_history[row] = new_text
+                
+                # 更新显示的文本
+                truncated_text = self.truncate_text(new_text)
+                self.history_list.item(row).setText(f"{row+1}. {truncated_text}")
+                
+                # 保存更改
+                self.save_history()
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径"""
