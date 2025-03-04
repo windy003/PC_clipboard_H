@@ -578,7 +578,14 @@ class ClipboardHistoryApp(QMainWindow):
 
     def on_clipboard_change(self):
         text = self.clipboard.text()
-        if text and text not in self.clipboard_history:
+        if text:
+            # 检查是否已存在于历史记录中
+            if text in self.clipboard_history:
+                # 如果已存在，从原位置移除
+                index = self.clipboard_history.index(text)
+                self.clipboard_history.pop(index)
+                self.history_list.takeItem(index)
+            
             # 添加新条目到历史记录开头
             self.clipboard_history.insert(0, text)
             # 显示截断后的文本
@@ -675,7 +682,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/3/1-01")
+        version_action = tray_menu.addAction("版本: 2025/3/4-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
