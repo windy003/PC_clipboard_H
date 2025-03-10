@@ -1137,28 +1137,26 @@ class ClipboardHistoryApp(QMainWindow):
                     description = item.get("description", "")
             
             if 0 <= current_row < len(data_list):
-                if '\n' in original_text or len(original_text) > 50 or description:
-                    self.preview_window.set_content(original_text, description)
-                    
-                    # 计算预览窗口的位置
-                    screen = QApplication.primaryScreen().geometry()
-                    preview_width = self.preview_window.width()
-                    
-                    # 计算预览窗口的理想x坐标
-                    ideal_x = self.x() + self.width() + 10
-                    
-                    # 如果预览窗口会超出屏幕右边界，则将其放在主窗口左侧
-                    if ideal_x + preview_width > screen.right():
-                        preview_x = self.x() - preview_width - 10
-                    else:
-                        preview_x = ideal_x
-                    
-                    preview_y = self.y()
-                    
-                    self.preview_window.move(preview_x, preview_y)
-                    self.preview_window.show()
+                # 移除条件判断，总是显示预览窗口
+                self.preview_window.set_content(original_text, description)
+                
+                # 计算预览窗口的位置
+                screen = QApplication.primaryScreen().geometry()
+                preview_width = self.preview_window.width()
+                
+                # 计算预览窗口的理想x坐标
+                ideal_x = self.x() + self.width() + 10
+                
+                # 如果预览窗口会超出屏幕右边界，则将其放在主窗口左侧
+                if ideal_x + preview_width > screen.right():
+                    preview_x = self.x() - preview_width - 10
                 else:
-                    self.preview_window.hide()
+                    preview_x = ideal_x
+                
+                preview_y = self.y()
+                
+                self.preview_window.move(preview_x, preview_y)
+                self.preview_window.show()
         except Exception as e:
             print(f"预览显示错误: {e}")
             self.preview_window.hide()

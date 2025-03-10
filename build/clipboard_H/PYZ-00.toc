@@ -1,4 +1,4 @@
-('D:\\files\\projects\\PC_clipboard_H\\build\\clipboard_H\\PYZ-00.pyz',
+('C:\\Users\\windy\\Desktop\\PC_clipboard_H\\build\\clipboard_H\\PYZ-00.pyz',
  [('PyQt6',
    'C:\\Users\\windy\\.pyenv\\pyenv-win\\versions\\3.9.13\\lib\\site-packages\\PyQt6\\__init__.py',
    'PYMODULE'),
