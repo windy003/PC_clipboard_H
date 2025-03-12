@@ -579,6 +579,7 @@ class ClipboardHistoryApp(QMainWindow):
     def on_clipboard_change(self):
         text = self.clipboard.text()
         if text:
+            print(f"原始文本: {text}")  # 调试输出
             # 检查是否已存在于历史记录中
             if text in self.clipboard_history:
                 # 如果已存在，从原位置移除
@@ -590,6 +591,7 @@ class ClipboardHistoryApp(QMainWindow):
             self.clipboard_history.insert(0, text)
             # 显示截断后的文本
             truncated_text = self.truncate_text(text)
+            print(f"截断后文本: {truncated_text}")  # 调试输出
             self.history_list.insertItem(0, truncated_text)
             
             # 如果历史记录超过10个，删除多余的条目
@@ -682,7 +684,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/3/11-01")
+        version_action = tray_menu.addAction("版本: 2025/3/13-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
@@ -1105,6 +1107,7 @@ class ClipboardHistoryApp(QMainWindow):
         # 移除文本中的换行符
         text = text.replace('\n', ' ').replace('\r', '')
         
+        # 确保不会特殊处理以find开头的文本
         if len(text) > max_length:
             return text[:max_length] + "..."
         return text
@@ -1222,7 +1225,7 @@ class ClipboardHistoryApp(QMainWindow):
             item = list_widget.item(i)
             text = item.text()
             # 移除可能存在的旧编号
-            if '. ' in text:
+            if text.find('. ') == 1 or text.find('. ') == 2:  # 只有当点号在第2或第3个位置时才认为是编号
                 text = text.split('. ', 1)[1]
             # 添加新编号
             item.setText(f"{i+1}. {text}")
