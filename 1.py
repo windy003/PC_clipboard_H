@@ -10,6 +10,7 @@ import keyboard
 import time
 import re
 import traceback
+from pynput.keyboard import Key, Controller
 
 # 修改热键线程的实现
 class HotkeyThread(QThread):
@@ -842,43 +843,13 @@ class SearchDialog(QDialog):
     
     def keyPressEvent(self, event):
         """处理按键事件"""
-        # 处理 E 键 (编辑选中项)
-        if event.key() == Qt.Key.Key_E and self.results_list.currentItem():
-            self.edit_selected_item()
-            return
-        # 处理 Alt+D 快捷键 (聚焦搜索框)
-        elif event.key() == Qt.Key.Key_D and event.modifiers() == Qt.KeyboardModifier.AltModifier:
-            self.search_input.setFocus()
-            self.search_input.selectAll()
-        # 处理 Alt+X 快捷键
-        elif event.key() == Qt.Key.Key_X and event.modifiers() == Qt.KeyboardModifier.AltModifier:
-            self.show_scope_menu()
-        # 处理 Alt+R 快捷键 (正则表达式)
-        elif event.key() == Qt.Key.Key_R and event.modifiers() == Qt.KeyboardModifier.AltModifier:
-            self.regex_checkbox.setChecked(not self.regex_checkbox.isChecked())
-        # 处理 Alt+C 快捷键 (区分大小写)
-        elif event.key() == Qt.Key.Key_C and event.modifiers() == Qt.KeyboardModifier.AltModifier:
-            self.case_sensitive_checkbox.setChecked(not self.case_sensitive_checkbox.isChecked())
-        # 处理 Alt+W 快捷键 (全字匹配)
-        elif event.key() == Qt.Key.Key_W and event.modifiers() == Qt.KeyboardModifier.AltModifier:
-            self.whole_word_checkbox.setChecked(not self.whole_word_checkbox.isChecked())
-        # 处理 Ctrl+C 快捷键 (复制选中项)
-        elif event.key() == Qt.Key.Key_C and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            self.copy_selected()
-        elif event.key() == Qt.Key.Key_Escape:
-            # 如果焦点在结果列表上，先将焦点返回到搜索框
-            if self.results_list.hasFocus():
-                self.search_input.setFocus()
-                return
+        if event.key() == Qt.Key.Key_Escape:
             self.reject()
-        elif event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
-            # 如果结果列表有选中项，则使用该项
-            if self.results_list.currentItem():
-                self.use_selected()
-            # 否则使用第一个结果（如果有）
-            elif self.results_list.count() > 0:
-                self.results_list.setCurrentRow(0)
-                self.use_selected()
+        elif event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            # 如果按下回车键，并且有选中的项目，则执行粘贴操作
+            if self.results_list.currentRow() >= 0:
+                self.paste_selected()
+                self.accept()  # 粘贴后关闭对话框
         else:
             super().keyPressEvent(event)
     
@@ -1035,6 +1006,40 @@ class SearchDialog(QDialog):
                 return True
         
         return super().eventFilter(obj, event)
+
+    def paste_selected(self):
+        """将选中的项目粘贴到当前活动窗口"""
+        index = self.results_list.currentRow()
+        if 0 <= index < len(self.results):
+            text = self.results[index][0]  # 获取选中项的文本内容
+            
+            try:
+                # 保存当前剪贴板内容
+                old_clipboard = QApplication.clipboard().text()
+                
+                # 设置新的剪贴板内容
+                QApplication.clipboard().setText(text)
+                
+                # 隐藏对话框
+                self.hide()
+                
+                # 等待一小段时间确保对话框已关闭
+                QTimer.singleShot(50, lambda: self._do_paste(old_clipboard))
+                
+            except Exception as e:
+                print(f"粘贴时出错: {e}")
+
+    def _do_paste(self, old_clipboard):
+        """执行实际的粘贴操作并恢复剪贴板"""
+        try:
+            # 模拟按下 Ctrl+V
+            keyboard.press_and_release('ctrl+v')
+            
+            # 短暂延迟后恢复原剪贴板内容
+            QTimer.singleShot(100, lambda: QApplication.clipboard().setText(old_clipboard))
+            
+        except Exception as e:
+            print(f"执行粘贴操作时出错: {e}")
 
 class DescriptionDialog(QDialog):
     """描述对话框，用于编辑内容和描述"""
@@ -1194,6 +1199,10 @@ class DescriptionDialog(QDialog):
     def get_description(self):
         """获取描述文本"""
         return self.description_edit.toPlainText()
+
+import keyboard
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QApplication
 
 class ClipboardHistoryApp(QMainWindow):
     def __init__(self):
@@ -1506,7 +1515,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/3/15-03")
+        version_action = tray_menu.addAction("版本: 2025/3/16-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
