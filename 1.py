@@ -1,13 +1,14 @@
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidget, 
                            QVBoxLayout, QPushButton, QWidget, QSystemTrayIcon, QMenu,
-                           QHBoxLayout, QStackedWidget, QLabel, QTextEdit, QDialog, QLineEdit, QMessageBox, QComboBox, QInputDialog, QFrame, QScrollArea)
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
+                           QHBoxLayout, QStackedWidget, QLabel, QTextEdit, QDialog, QLineEdit, QMessageBox, QComboBox, QInputDialog, QFrame, QScrollArea, QCheckBox)
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QPoint
 from PyQt6.QtGui import QClipboard, QIcon, QKeyEvent
 import sys
 import json
 import os
 import keyboard
 import time
+import re
 
 # 修改热键线程的实现
 class HotkeyThread(QThread):
@@ -169,63 +170,163 @@ class HotkeySettingDialog(QDialog):
                 self.hotkey_display.setText(self.new_hotkey)
 
 class DescriptionDialog(QDialog):
-    """描述信息编辑对话框"""
+    """描述对话框，用于编辑内容和描述"""
     def __init__(self, parent=None, text="", description=""):
         super().__init__(parent)
         self.setWindowTitle("编辑内容和描述")
-        self.setFixedSize(400, 300)
-        self.original_geometry = None  # 存储原始窗口大小和位置
+        self.resize(800, 600)  # 增加窗口尺寸
         
         layout = QVBoxLayout(self)
         
-        # 描述信息编辑框 - 添加 Alt+D 快捷键
-        description_label = QLabel("描述信息(&D):")
+        # 内容标签
+        content_label = QLabel("内容(&C):")  # 添加快捷键 Alt+C
+        content_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(content_label)
+        
+        # 内容编辑框
+        self.content_edit = QTextEdit()
+        self.content_edit.setPlainText(text)
+        self.content_edit.setMinimumHeight(250)
+        content_label.setBuddy(self.content_edit)  # 将标签与编辑框关联
+        layout.addWidget(self.content_edit)
+        
+        # 描述标签
+        description_label = QLabel("描述(&D):")  # 添加快捷键 Alt+D
+        description_label.setStyleSheet("font-weight: bold; font-size: 14px;")
         layout.addWidget(description_label)
+        
+        # 描述编辑框
         self.description_edit = QTextEdit()
         self.description_edit.setPlainText(description)
+        self.description_edit.setMinimumHeight(150)
+        description_label.setBuddy(self.description_edit)  # 将标签与编辑框关联
         layout.addWidget(self.description_edit)
-        description_label.setBuddy(self.description_edit)
-        
-        # 内容编辑框 - 添加 Alt+T 快捷键
-        content_label = QLabel("条目内容(&T):")
-        layout.addWidget(content_label)
-        self.content_text = QTextEdit()
-        self.content_text.setPlainText(text)
-        layout.addWidget(self.content_text)
-        content_label.setBuddy(self.content_text)
         
         # 按钮布局
         button_layout = QHBoxLayout()
         
-        # 全屏按钮
-        self.fullscreen_button = QPushButton("全屏(&F)")
+        # 全屏切换按钮
+        self.fullscreen_button = QPushButton("全屏切换(&F)")  # 添加快捷键 Alt+F
         self.fullscreen_button.clicked.connect(self.toggle_fullscreen)
         button_layout.addWidget(self.fullscreen_button)
         
-        self.confirm_button = QPushButton("确认(&O)")
-        self.confirm_button.clicked.connect(self.accept)
-        self.cancel_button = QPushButton("取消(&C)")
+        # 清空内容按钮
+        self.clear_content_button = QPushButton("清空内容(&L)")  # 添加快捷键 Alt+L
+        self.clear_content_button.clicked.connect(self.clear_content)
+        button_layout.addWidget(self.clear_content_button)
+        
+        # 清空描述按钮
+        self.clear_desc_button = QPushButton("清空描述(&R)")  # 添加快捷键 Alt+R
+        self.clear_desc_button.clicked.connect(self.clear_description)
+        button_layout.addWidget(self.clear_desc_button)
+        
+        # 添加弹性空间
+        button_layout.addStretch()
+        
+        # 确定按钮
+        self.ok_button = QPushButton("确定(&O)")  # 添加快捷键 Alt+O
+        self.ok_button.clicked.connect(self.accept)
+        button_layout.addWidget(self.ok_button)
+        
+        # 取消按钮
+        self.cancel_button = QPushButton("取消(&X)")  # 添加快捷键 Alt+X
         self.cancel_button.clicked.connect(self.reject)
-        button_layout.addWidget(self.confirm_button)
         button_layout.addWidget(self.cancel_button)
+        
         layout.addLayout(button_layout)
+        
+        # 添加快捷键提示标签
+        shortcut_label = QLabel("快捷键: Alt+C=内容 Alt+D=描述 Alt+F=全屏 Alt+L=清空内容 Alt+R=清空描述 Alt+O=确定 Alt+X=取消")
+        shortcut_label.setStyleSheet("color: gray; font-style: italic; font-size: 12px;")
+        layout.addWidget(shortcut_label)
+        
+        # 设置窗口样式
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #f5f5f5;
+            }
+            QTextEdit {
+                background-color: white;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 13px;
+                line-height: 1.5;
+            }
+            QPushButton {
+                background-color: #4a86e8;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #3a76d8;
+            }
+            QPushButton:pressed {
+                background-color: #2a66c8;
+            }
+            QPushButton#cancel_button {
+                background-color: #f0f0f0;
+                color: #333;
+                border: 1px solid #ddd;
+            }
+            QPushButton#cancel_button:hover {
+                background-color: #e0e0e0;
+            }
+        """)
+        
+        # 设置确定和取消按钮的对象名，用于样式表
+        self.ok_button.setObjectName("ok_button")
+        self.cancel_button.setObjectName("cancel_button")
+        
+        # 设置窗口标志，使其保持在最前面
+        self.setWindowFlags(
+            Qt.WindowType.Window |
+            Qt.WindowType.WindowStaysOnTopHint
+        )
+        
+        # 设置初始焦点到内容编辑框
+        self.content_edit.setFocus()
     
     def toggle_fullscreen(self):
+        """切换全屏模式"""
         if self.isFullScreen():
             self.showNormal()
-            if self.original_geometry:
-                self.setGeometry(self.original_geometry)
-            self.fullscreen_button.setText("全屏(&F)")
+            self.fullscreen_button.setText("全屏切换(&F)")
         else:
-            self.original_geometry = self.geometry()
             self.showFullScreen()
             self.fullscreen_button.setText("退出全屏(&F)")
     
-    def get_description(self):
-        return self.description_edit.toPlainText()
+    def clear_content(self):
+        """清空内容编辑框"""
+        self.content_edit.clear()
+        self.content_edit.setFocus()
+    
+    def clear_description(self):
+        """清空描述编辑框"""
+        self.description_edit.clear()
+        self.description_edit.setFocus()
+    
+    def keyPressEvent(self, event):
+        """处理按键事件"""
+        # 处理 Ctrl+Enter 快捷键 (确定)
+        if event.key() == Qt.Key.Key_Return and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            self.accept()
+        # 处理 Escape 键 (取消)
+        elif event.key() == Qt.Key.Key_Escape:
+            self.reject()
+        else:
+            super().keyPressEvent(event)
     
     def get_content(self):
-        return self.content_text.toPlainText()
+        """获取内容文本"""
+        return self.content_edit.toPlainText()
+    
+    def get_description(self):
+        """获取描述文本"""
+        return self.description_edit.toPlainText()
 
 class PreviewWindow(QWidget):
     """悬浮预览窗口"""
@@ -378,11 +479,727 @@ class EditItemDialog(QDialog):
         """获取编辑后的文本"""
         return self.text_edit.toPlainText()
 
+class SearchDialog(QDialog):
+    """搜索对话框"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("搜索")
+        self.resize(500, 400)  # 增加对话框尺寸以容纳搜索结果
+        self.parent_app = parent
+        
+        layout = QVBoxLayout(self)
+        
+        # 搜索框
+        search_layout = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("输入搜索关键词(&D)")  # 添加Alt+D快捷键提示
+        self.search_input.textChanged.connect(self.on_search_text_changed)  # 连接文本变化信号
+        # 为搜索框添加按键事件过滤器
+        self.search_input.installEventFilter(self)
+        search_layout.addWidget(self.search_input)
+        
+        layout.addLayout(search_layout)
+        
+        # 搜索选项布局
+        options_layout = QHBoxLayout()
+        
+        # 正则表达式选项 - Alt+R
+        self.regex_checkbox = QCheckBox("使用正则表达式(&R)")
+        self.regex_checkbox.stateChanged.connect(self.on_search_option_changed)
+        options_layout.addWidget(self.regex_checkbox)
+        
+        # 区分大小写选项 - Alt+C
+        self.case_sensitive_checkbox = QCheckBox("区分大小写(&C)")
+        self.case_sensitive_checkbox.stateChanged.connect(self.on_search_option_changed)
+        options_layout.addWidget(self.case_sensitive_checkbox)
+        
+        # 全字匹配选项 - Alt+W
+        self.whole_word_checkbox = QCheckBox("全字匹配(&W)")
+        self.whole_word_checkbox.stateChanged.connect(self.on_search_option_changed)
+        options_layout.addWidget(self.whole_word_checkbox)
+        
+        layout.addLayout(options_layout)
+        
+        # 搜索范围选项 - Alt+X
+        scope_layout = QHBoxLayout()
+        scope_layout.addWidget(QLabel("搜索范围:"))
+        
+        self.scope_combo = QComboBox()
+        self.scope_combo.addItems(["全部", "历史记录", "当前收藏夹", "所有收藏夹"])
+        self.scope_combo.currentIndexChanged.connect(self.on_search_option_changed)
+        scope_layout.addWidget(self.scope_combo)
+        
+        # 设置快捷键 Alt+X 显示下拉菜单
+        self.scope_button = QPushButton("选择范围(&X)")
+        self.scope_button.clicked.connect(self.show_scope_menu)
+        scope_layout.addWidget(self.scope_button)
+        
+        layout.addLayout(scope_layout)
+        
+        # 创建水平分割布局
+        split_layout = QHBoxLayout()
+        
+        # 结果列表
+        self.results_list = QListWidget()
+        self.results_list.itemDoubleClicked.connect(self.use_selected)
+        self.results_list.currentItemChanged.connect(self.show_preview)
+        # 设置右键菜单
+        self.results_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.results_list.customContextMenuRequested.connect(self.show_results_context_menu)
+        split_layout.addWidget(self.results_list)
+        
+        layout.addLayout(split_layout)
+        
+        # 按钮布局
+        button_layout = QHBoxLayout()
+        
+        # 使用选中项按钮
+        self.use_button = QPushButton("使用选中项")
+        self.use_button.clicked.connect(self.use_selected)
+        button_layout.addWidget(self.use_button)
+        
+        # 关闭按钮
+        self.close_button = QPushButton("关闭")
+        self.close_button.clicked.connect(self.reject)
+        button_layout.addWidget(self.close_button)
+        
+        layout.addLayout(button_layout)
+        
+        # 存储搜索结果
+        self.results = []
+        
+        # 创建悬浮预览窗口
+        self.preview_window = QWidget(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+        self.preview_window.setMinimumSize(500, 400)  # 设置更大的预览窗口尺寸
+        self.preview_window.setStyleSheet("""
+            QWidget {
+                background-color: #f8f8f8;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+            }
+            QTextEdit {
+                background-color: white;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                padding: 5px;
+            }
+            QLabel {
+                font-weight: bold;
+                color: #333;
+            }
+        """)
+        
+        # 预览窗口布局
+        preview_layout = QVBoxLayout(self.preview_window)
+        
+        # 描述标签和内容
+        self.preview_desc_label = QLabel("描述:")
+        preview_layout.addWidget(self.preview_desc_label)
+        
+        self.preview_desc = QTextEdit()
+        self.preview_desc.setReadOnly(True)
+        self.preview_desc.setMinimumHeight(100)
+        preview_layout.addWidget(self.preview_desc)
+        
+        # 内容标签和显示
+        self.preview_content_label = QLabel("内容:")
+        preview_layout.addWidget(self.preview_content_label)
+        
+        self.preview_content = QTextEdit()
+        self.preview_content.setReadOnly(True)
+        preview_layout.addWidget(self.preview_content)
+        
+        # 设置焦点到搜索框
+        self.search_input.setFocus()
+        
+        # 设置窗口标志，使其保持在最前面
+        self.setWindowFlags(
+            Qt.WindowType.Window |
+            Qt.WindowType.WindowStaysOnTopHint
+        )
+        
+        # 添加提示标签
+        hint_label = QLabel("提示: 选中条目后按E键或右键可编辑内容和描述")
+        hint_label.setStyleSheet("color: gray; font-style: italic;")
+        layout.addWidget(hint_label)
+    
+    def show_scope_menu(self):
+        """显示搜索范围下拉菜单"""
+        # 创建菜单
+        menu = QMenu(self)
+        
+        # 添加基本搜索范围选项
+        basic_scopes = ["全部", "历史记录", "当前收藏夹", "所有收藏夹"]
+        for i, scope in enumerate(basic_scopes):
+            action = menu.addAction(scope)
+            # 标记当前选中的范围
+            if i == self.scope_combo.currentIndex() and self.scope_combo.currentText() == scope:
+                action.setIcon(QIcon.fromTheme("dialog-ok"))
+            
+            # 连接动作信号
+            action.triggered.connect(lambda checked, idx=i, s=scope: self.set_search_scope(s, idx))
+        
+        # 添加分隔线
+        menu.addSeparator()
+        
+        # 添加子收藏夹选项
+        if hasattr(self.parent_app, 'favorites') and self.parent_app.favorites:
+            submenu = menu.addMenu("指定收藏夹")
+            for folder_name in sorted(self.parent_app.favorites.keys()):
+                action = submenu.addAction(folder_name)
+                # 标记当前选中的收藏夹
+                if self.scope_combo.currentText() == f"收藏夹: {folder_name}":
+                    action.setIcon(QIcon.fromTheme("dialog-ok"))
+                
+                # 连接动作信号
+                action.triggered.connect(lambda checked, name=folder_name: self.set_folder_scope(name))
+        
+        # 在按钮下方显示菜单
+        menu.exec(self.scope_button.mapToGlobal(QPoint(0, self.scope_button.height())))
+    
+    def set_search_scope(self, scope, index):
+        """设置搜索范围"""
+        self.scope_combo.setCurrentIndex(index)
+        self.perform_search()
+
+    def set_folder_scope(self, folder_name):
+        """设置特定收藏夹作为搜索范围"""
+        # 检查是否已存在该选项
+        folder_scope = f"收藏夹: {folder_name}"
+        index = self.scope_combo.findText(folder_scope)
+        
+        if index == -1:
+            # 如果不存在，添加新选项
+            self.scope_combo.addItem(folder_scope)
+            index = self.scope_combo.count() - 1
+        
+        # 设置为当前选项
+        self.scope_combo.setCurrentIndex(index)
+        self.perform_search()
+    
+    def show_preview(self, current, previous):
+        """显示选中项的预览"""
+        if not current:
+            self.preview_window.hide()
+            return
+        
+        index = self.results_list.currentRow()
+        if 0 <= index < len(self.results):
+            text, source, original_index, description = self.results[index]
+            
+            # 设置预览内容
+            self.preview_content.setHtml(f"<pre style='white-space: pre-wrap; word-wrap: break-word;'>{text}</pre>")
+            
+            # 设置描述内容（如果有）
+            if description:
+                self.preview_desc.setHtml(f"<pre style='white-space: pre-wrap; word-wrap: break-word;'>{description}</pre>")
+                self.preview_desc_label.show()
+                self.preview_desc.show()
+            else:
+                self.preview_desc_label.hide()
+                self.preview_desc.hide()
+            
+            # 计算预览窗口位置
+            pos = self.mapToGlobal(self.rect().topRight())
+            screen_rect = QApplication.primaryScreen().geometry()
+            
+            # 确保预览窗口不会超出屏幕边界
+            window_width = self.preview_window.width()
+            window_height = self.preview_window.height()
+            
+            if pos.x() + window_width > screen_rect.right():
+                pos.setX(screen_rect.right() - window_width)
+            
+            if pos.y() + window_height > screen_rect.bottom():
+                pos.setY(screen_rect.bottom() - window_height)
+            
+            self.preview_window.move(pos)
+            self.preview_window.show()
+        else:
+            self.preview_window.hide()
+    
+    def show_results_context_menu(self, position):
+        """显示搜索结果的右键菜单"""
+        menu = QMenu()
+        current_item = self.results_list.currentItem()
+        
+        if current_item:
+            index = self.results_list.currentRow()
+            if 0 <= index < len(self.results):
+                text, source, original_index, description = self.results[index]
+                
+                # 添加编辑选项
+                edit_action = menu.addAction("编辑内容和描述(&E)")  # Alt+E
+                use_action = menu.addAction("使用选中项(&U)")  # Alt+U
+                copy_action = menu.addAction("复制到剪贴板(&C)")  # Alt+C
+                
+                # 如果是历史记录，添加"添加到收藏"选项
+                if source == "历史记录":
+                    add_to_favorites = menu.addAction("添加到收藏(&A)")  # Alt+A
+                
+                action = menu.exec(self.results_list.mapToGlobal(position))
+                
+                if action == edit_action:
+                    self.edit_selected_item()
+                elif action == use_action:
+                    self.use_selected()
+                elif action == copy_action:
+                    self.copy_selected()
+                elif source == "历史记录" and action == add_to_favorites:
+                    self.add_to_favorites(text)
+    
+    def edit_selected_item(self):
+        """编辑选中的搜索结果项"""
+        index = self.results_list.currentRow()
+        if 0 <= index < len(self.results):
+            text, source, original_index, description = self.results[index]
+            
+            # 创建编辑对话框
+            dialog = DescriptionDialog(self, text=text, description=description)
+            
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                new_description = dialog.get_description()
+                new_content = dialog.get_content()
+                
+                # 更新内容
+                if source == "历史记录":
+                    # 更新历史记录
+                    self.parent_app.clipboard_history[original_index] = new_content
+                    self.parent_app.save_history()
+                    
+                    # 更新显示
+                    truncated_text = self.parent_app.truncate_text(new_content)
+                    self.parent_app.history_list.item(original_index).setText(f"{original_index+1}. {truncated_text}")
+                    
+                    # 更新搜索结果
+                    self.results[index] = (new_content, source, original_index, "")
+                    
+                elif source.startswith("收藏夹-"):
+                    # 更新收藏夹
+                    folder_name = source[5:]  # 去掉前缀 "收藏夹-"
+                    if folder_name in self.parent_app.favorites:
+                        item = self.parent_app.favorites[folder_name][original_index]
+                        if isinstance(item, dict):
+                            item["text"] = new_content
+                            item["description"] = new_description
+                        else:
+                            # 如果是旧格式，转换为新格式
+                            self.parent_app.favorites[folder_name][original_index] = {
+                                "text": new_content,
+                                "description": new_description
+                            }
+                        
+                        # 保存更改
+                        self.parent_app.save_favorites()
+                        
+                        # 如果当前显示的是该收藏夹，更新显示
+                        if self.parent_app.current_folder == folder_name:
+                            truncated_text = self.parent_app.truncate_text(new_content)
+                            self.parent_app.favorites_list.item(original_index).setText(f"{original_index+1}. {truncated_text}")
+                        
+                        # 更新搜索结果
+                        self.results[index] = (new_content, source, original_index, new_description)
+                
+                # 更新搜索结果列表显示
+                context = self.get_keyword_context(new_content, self.search_input.text(), 
+                                                 self.regex_checkbox.isChecked(), 
+                                                 self.case_sensitive_checkbox.isChecked())
+                item_text = f"{index+1}. [{source}] {context}"
+                if new_description:
+                    item_text += " [有描述]"
+                self.results_list.item(index).setText(item_text)
+                
+                # 更新预览
+                self.show_preview(self.results_list.currentItem(), None)
+    
+    def add_to_favorites(self, text):
+        """添加文本到当前收藏夹"""
+        # 创建新的收藏项
+        new_item = {
+            "text": text,
+            "description": ""
+        }
+        
+        # 检查是否已存在
+        existing_texts = [item["text"] if isinstance(item, dict) else item 
+                          for item in self.parent_app.favorites[self.parent_app.current_folder]]
+        
+        if text not in existing_texts:
+            self.parent_app.favorites[self.parent_app.current_folder].insert(0, new_item)
+            truncated_text = self.parent_app.truncate_text(text)
+            self.parent_app.favorites_list.insertItem(0, truncated_text)
+            self.parent_app.update_list_numbers(self.parent_app.favorites_list)
+            self.parent_app.save_favorites()
+            QMessageBox.information(self, "添加成功", "已添加到当前收藏夹")
+        else:
+            QMessageBox.information(self, "提示", "该内容已存在于当前收藏夹")
+    
+    def keyPressEvent(self, event):
+        """处理按键事件"""
+        # 处理 E 键 (编辑选中项)
+        if event.key() == Qt.Key.Key_E and self.results_list.currentItem():
+            self.edit_selected_item()
+            return
+        # 处理 Alt+D 快捷键 (聚焦搜索框)
+        elif event.key() == Qt.Key.Key_D and event.modifiers() == Qt.KeyboardModifier.AltModifier:
+            self.search_input.setFocus()
+            self.search_input.selectAll()
+        # 处理 Alt+X 快捷键
+        elif event.key() == Qt.Key.Key_X and event.modifiers() == Qt.KeyboardModifier.AltModifier:
+            self.show_scope_menu()
+        # 处理 Alt+R 快捷键 (正则表达式)
+        elif event.key() == Qt.Key.Key_R and event.modifiers() == Qt.KeyboardModifier.AltModifier:
+            self.regex_checkbox.setChecked(not self.regex_checkbox.isChecked())
+        # 处理 Alt+C 快捷键 (区分大小写)
+        elif event.key() == Qt.Key.Key_C and event.modifiers() == Qt.KeyboardModifier.AltModifier:
+            self.case_sensitive_checkbox.setChecked(not self.case_sensitive_checkbox.isChecked())
+        # 处理 Alt+W 快捷键 (全字匹配)
+        elif event.key() == Qt.Key.Key_W and event.modifiers() == Qt.KeyboardModifier.AltModifier:
+            self.whole_word_checkbox.setChecked(not self.whole_word_checkbox.isChecked())
+        # 处理 Ctrl+C 快捷键 (复制选中项)
+        elif event.key() == Qt.Key.Key_C and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            self.copy_selected()
+        elif event.key() == Qt.Key.Key_Escape:
+            # 如果焦点在结果列表上，先将焦点返回到搜索框
+            if self.results_list.hasFocus():
+                self.search_input.setFocus()
+                return
+            self.reject()
+        elif event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
+            # 如果结果列表有选中项，则使用该项
+            if self.results_list.currentItem():
+                self.use_selected()
+            # 否则使用第一个结果（如果有）
+            elif self.results_list.count() > 0:
+                self.results_list.setCurrentRow(0)
+                self.use_selected()
+        else:
+            super().keyPressEvent(event)
+    
+    def copy_selected(self):
+        """复制选中项到剪贴板"""
+        index = self.results_list.currentRow()
+        if 0 <= index < len(self.results):
+            text = self.results[index][0]
+            QApplication.clipboard().setText(text)
+            # 显示复制成功提示
+            QMessageBox.information(self, "复制成功", "文本已复制到剪贴板")
+    
+    def on_search_text_changed(self):
+        """搜索文本变化时触发搜索"""
+        self.perform_search()
+    
+    def on_search_option_changed(self):
+        """搜索选项变化时触发搜索"""
+        self.perform_search()
+    
+    def perform_search(self):
+        """执行搜索"""
+        search_text = self.search_input.text()
+        use_regex = self.regex_checkbox.isChecked()
+        case_sensitive = self.case_sensitive_checkbox.isChecked()
+        whole_word = self.whole_word_checkbox.isChecked()
+        scope = self.scope_combo.currentText()
+        
+        # 如果搜索文本为空，清空结果
+        if not search_text:
+            self.results = []
+            self.fill_results()
+            return
+        
+        # 执行搜索
+        try:
+            self.results = self.parent_app.search_items(
+                search_text, use_regex, scope, case_sensitive, whole_word
+            )
+            self.fill_results()
+        except Exception as e:
+            QMessageBox.warning(self, "搜索错误", f"搜索时发生错误: {str(e)}")
+    
+    def fill_results(self):
+        """填充搜索结果到列表"""
+        self.results_list.clear()
+        
+        for i, (text, source, original_index, description) in enumerate(self.results):
+            # 获取关键词上下文
+            context = self.get_keyword_context(
+                text, 
+                self.search_input.text(), 
+                self.regex_checkbox.isChecked(),
+                self.case_sensitive_checkbox.isChecked()
+            )
+            
+            # 创建列表项
+            item_text = f"{i+1}. [{source}] {context}"
+            if description:
+                item_text += " [有描述]"
+            
+            self.results_list.addItem(item_text)
+        
+        # 如果有结果，选中第一项
+        if self.results_list.count() > 0:
+            self.results_list.setCurrentRow(0)
+    
+    def get_keyword_context(self, text, keyword, use_regex=False, case_sensitive=False):
+        """获取关键词上下文"""
+        context_length = 20  # 关键词前后显示的字符数
+        
+        if not keyword:
+            return self.parent_app.truncate_text(text)
+        
+        if use_regex:
+            try:
+                flags = 0 if case_sensitive else re.IGNORECASE
+                pattern = re.compile(keyword, flags)
+                match = pattern.search(text)
+                
+                if match:
+                    start, end = match.span()
+                    # 获取关键词前后的文本
+                    prefix = text[max(0, start - context_length):start]
+                    suffix = text[end:min(len(text), end + context_length)]
+                    
+                    # 如果前缀不是从文本开头开始，添加省略号
+                    if start > context_length:
+                        prefix = "..." + prefix
+                    
+                    # 如果后缀不是到文本结尾，添加省略号
+                    if end + context_length < len(text):
+                        suffix = suffix + "..."
+                    
+                    # 返回带有关键词上下文的文本
+                    return f"{prefix}<b>{text[start:end]}</b>{suffix}"
+                else:
+                    return self.parent_app.truncate_text(text)
+            except Exception:
+                return self.parent_app.truncate_text(text)
+        else:
+            # 非正则表达式搜索
+            if not case_sensitive:
+                text_lower = text.lower()
+                keyword_lower = keyword.lower()
+                index = text_lower.find(keyword_lower)
+            else:
+                index = text.find(keyword)
+            
+            if index != -1:
+                # 获取关键词前后的文本
+                start = index
+                end = index + len(keyword)
+                
+                prefix = text[max(0, start - context_length):start]
+                suffix = text[end:min(len(text), end + context_length)]
+                
+                # 如果前缀不是从文本开头开始，添加省略号
+                if start > context_length:
+                    prefix = "..." + prefix
+                
+                # 如果后缀不是到文本结尾，添加省略号
+                if end + context_length < len(text):
+                    suffix = suffix + "..."
+                
+                # 返回带有关键词上下文的文本
+                return f"{prefix}<b>{text[start:end]}</b>{suffix}"
+            else:
+                return self.parent_app.truncate_text(text)
+    
+    def use_selected(self):
+        """使用选中的搜索结果"""
+        index = self.results_list.currentRow()
+        if 0 <= index < len(self.results):
+            text = self.results[index][0]
+            QApplication.clipboard().setText(text)
+            self.accept()  # 关闭对话框
+    
+    def closeEvent(self, event):
+        """关闭事件处理"""
+        self.preview_window.hide()
+        event.accept()
+    
+    def reject(self):
+        """取消对话框"""
+        self.preview_window.hide()
+        super().reject()
+    
+    def eventFilter(self, obj, event):
+        """事件过滤器，处理搜索框的按键事件"""
+        if obj is self.search_input and event.type() == event.Type.KeyPress:
+            # 处理向下箭头键，将焦点移到结果列表
+            if event.key() == Qt.Key.Key_Down:
+                if self.results_list.count() > 0:
+                    self.results_list.setFocus()
+                    self.results_list.setCurrentRow(0)
+                return True
+            # 处理向上箭头键，如果搜索框有文本，则清空
+            elif event.key() == Qt.Key.Key_Up and self.search_input.text():
+                self.search_input.clear()
+                return True
+        
+        return super().eventFilter(obj, event)
+
+class DescriptionDialog(QDialog):
+    """描述对话框，用于编辑内容和描述"""
+    def __init__(self, parent=None, text="", description=""):
+        super().__init__(parent)
+        self.setWindowTitle("编辑内容和描述")
+        self.resize(800, 600)  # 增加窗口尺寸
+        
+        layout = QVBoxLayout(self)
+        
+        # 内容标签
+        content_label = QLabel("内容(&C):")  # 添加快捷键 Alt+C
+        content_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(content_label)
+        
+        # 内容编辑框
+        self.content_edit = QTextEdit()
+        self.content_edit.setPlainText(text)
+        self.content_edit.setMinimumHeight(250)
+        content_label.setBuddy(self.content_edit)  # 将标签与编辑框关联
+        layout.addWidget(self.content_edit)
+        
+        # 描述标签
+        description_label = QLabel("描述(&D):")  # 添加快捷键 Alt+D
+        description_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        layout.addWidget(description_label)
+        
+        # 描述编辑框
+        self.description_edit = QTextEdit()
+        self.description_edit.setPlainText(description)
+        self.description_edit.setMinimumHeight(150)
+        description_label.setBuddy(self.description_edit)  # 将标签与编辑框关联
+        layout.addWidget(self.description_edit)
+        
+        # 按钮布局
+        button_layout = QHBoxLayout()
+        
+        # 全屏切换按钮
+        self.fullscreen_button = QPushButton("全屏切换(&F)")  # 添加快捷键 Alt+F
+        self.fullscreen_button.clicked.connect(self.toggle_fullscreen)
+        button_layout.addWidget(self.fullscreen_button)
+        
+        # 清空内容按钮
+        self.clear_content_button = QPushButton("清空内容(&L)")  # 添加快捷键 Alt+L
+        self.clear_content_button.clicked.connect(self.clear_content)
+        button_layout.addWidget(self.clear_content_button)
+        
+        # 清空描述按钮
+        self.clear_desc_button = QPushButton("清空描述(&R)")  # 添加快捷键 Alt+R
+        self.clear_desc_button.clicked.connect(self.clear_description)
+        button_layout.addWidget(self.clear_desc_button)
+        
+        # 添加弹性空间
+        button_layout.addStretch()
+        
+        # 确定按钮
+        self.ok_button = QPushButton("确定(&O)")  # 添加快捷键 Alt+O
+        self.ok_button.clicked.connect(self.accept)
+        button_layout.addWidget(self.ok_button)
+        
+        # 取消按钮
+        self.cancel_button = QPushButton("取消(&X)")  # 添加快捷键 Alt+X
+        self.cancel_button.clicked.connect(self.reject)
+        button_layout.addWidget(self.cancel_button)
+        
+        layout.addLayout(button_layout)
+        
+        # 添加快捷键提示标签
+        shortcut_label = QLabel("快捷键: Alt+C=内容 Alt+D=描述 Alt+F=全屏 Alt+L=清空内容 Alt+R=清空描述 Alt+O=确定 Alt+X=取消")
+        shortcut_label.setStyleSheet("color: gray; font-style: italic; font-size: 12px;")
+        layout.addWidget(shortcut_label)
+        
+        # 设置窗口样式
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #f5f5f5;
+            }
+            QTextEdit {
+                background-color: white;
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 13px;
+                line-height: 1.5;
+            }
+            QPushButton {
+                background-color: #4a86e8;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #3a76d8;
+            }
+            QPushButton:pressed {
+                background-color: #2a66c8;
+            }
+            QPushButton#cancel_button {
+                background-color: #f0f0f0;
+                color: #333;
+                border: 1px solid #ddd;
+            }
+            QPushButton#cancel_button:hover {
+                background-color: #e0e0e0;
+            }
+        """)
+        
+        # 设置确定和取消按钮的对象名，用于样式表
+        self.ok_button.setObjectName("ok_button")
+        self.cancel_button.setObjectName("cancel_button")
+        
+        # 设置窗口标志，使其保持在最前面
+        self.setWindowFlags(
+            Qt.WindowType.Window |
+            Qt.WindowType.WindowStaysOnTopHint
+        )
+        
+        # 设置初始焦点到内容编辑框
+        self.content_edit.setFocus()
+    
+    def toggle_fullscreen(self):
+        """切换全屏模式"""
+        if self.isFullScreen():
+            self.showNormal()
+            self.fullscreen_button.setText("全屏切换(&F)")
+        else:
+            self.showFullScreen()
+            self.fullscreen_button.setText("退出全屏(&F)")
+    
+    def clear_content(self):
+        """清空内容编辑框"""
+        self.content_edit.clear()
+        self.content_edit.setFocus()
+    
+    def clear_description(self):
+        """清空描述编辑框"""
+        self.description_edit.clear()
+        self.description_edit.setFocus()
+    
+    def keyPressEvent(self, event):
+        """处理按键事件"""
+        # 处理 Ctrl+Enter 快捷键 (确定)
+        if event.key() == Qt.Key.Key_Return and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            self.accept()
+        # 处理 Escape 键 (取消)
+        elif event.key() == Qt.Key.Key_Escape:
+            self.reject()
+        else:
+            super().keyPressEvent(event)
+    
+    def get_content(self):
+        """获取内容文本"""
+        return self.content_edit.toPlainText()
+    
+    def get_description(self):
+        """获取描述文本"""
+        return self.description_edit.toPlainText()
+
 class ClipboardHistoryApp(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("剪贴板历史")
-        
         
         # 设置窗口图标
         icon_path = get_resource_path("icon.ico")
@@ -517,6 +1334,12 @@ class ClipboardHistoryApp(QMainWindow):
         self.hotkey_thread.triggered.connect(self.show_window)
         self.hotkey_thread.error.connect(self.handle_hotkey_error)  # 连接错误处理
         self.hotkey_thread.start()
+        
+        # 创建搜索热键线程
+        self.search_hotkey_thread = HotkeyThread('ctrl+alt+a')
+        self.search_hotkey_thread.triggered.connect(self.show_search_dialog)
+        self.search_hotkey_thread.error.connect(self.handle_search_hotkey_error)
+        self.search_hotkey_thread.start()
         
         # 创建系统托盘图标 (只调用一次)
         self.create_tray_icon()
@@ -684,8 +1507,15 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/3/13-01")
+        version_action = tray_menu.addAction("版本: 2025/3/15-01")
         version_action.setEnabled(False)  # 设置为不可点击
+        
+        # 添加分隔线
+        tray_menu.addSeparator()
+        
+        # 添加搜索选项
+        search_action = tray_menu.addAction("搜索(&S)")
+        search_action.triggered.connect(self.show_search_dialog)
         
         # 添加分隔线
         tray_menu.addSeparator()
@@ -979,6 +1809,9 @@ class ClipboardHistoryApp(QMainWindow):
         if hasattr(self, 'hotkey_thread'):
             self.hotkey_thread.stop()
             self.hotkey_thread.wait()
+        if hasattr(self, 'search_hotkey_thread'):
+            self.search_hotkey_thread.stop()
+            self.search_hotkey_thread.wait()
 
     def eventFilter(self, obj, event):
         """事件过滤器，处理窗口事件"""
@@ -1469,6 +2302,120 @@ class ClipboardHistoryApp(QMainWindow):
                 
                 # 保存更改
                 self.save_history()
+
+    def show_search_dialog(self):
+        """显示搜索对话框"""
+        dialog = SearchDialog(self)
+        dialog.exec()
+    
+    def search_items(self, search_text, use_regex, scope, case_sensitive=False, whole_word=False):
+        """搜索项目"""
+        results = []
+        
+        # 定义搜索函数
+        def match_text(text, description, pattern, is_regex, is_case_sensitive, is_whole_word):
+            # 首先检查文本内容是否匹配
+            text_match = False
+            desc_match = False
+            
+            if is_regex:
+                try:
+                    # 正则表达式搜索
+                    flags = 0 if is_case_sensitive else re.IGNORECASE
+                    if is_whole_word:
+                        # 全字匹配的正则表达式
+                        pattern = r'\b' + pattern + r'\b'
+                    text_match = bool(re.search(pattern, text, flags))
+                    if description:
+                        desc_match = bool(re.search(pattern, description, flags))
+                except re.error:
+                    # 正则表达式错误，使用普通搜索
+                    text_match = self.normal_search(text, pattern, is_case_sensitive, is_whole_word)
+                    if description:
+                        desc_match = self.normal_search(description, pattern, is_case_sensitive, is_whole_word)
+            else:
+                # 普通搜索
+                text_match = self.normal_search(text, pattern, is_case_sensitive, is_whole_word)
+                if description:
+                    desc_match = self.normal_search(description, pattern, is_case_sensitive, is_whole_word)
+            
+            return text_match or desc_match
+        
+        # 搜索历史记录
+        if scope in ["全部", "历史记录"]:
+            for i, text in enumerate(self.clipboard_history):
+                if match_text(text, "", search_text, use_regex, case_sensitive, whole_word):
+                    results.append((text, "历史记录", i, ""))
+        
+        # 搜索收藏夹
+        if scope.startswith("收藏夹: "):
+            # 搜索特定收藏夹
+            folder_name = scope[5:]  # 去掉前缀 "收藏夹: "
+            if folder_name in self.favorites:
+                for i, item in enumerate(self.favorites[folder_name]):
+                    item_text = item["text"] if isinstance(item, dict) else str(item)
+                    description = item.get("description", "") if isinstance(item, dict) else ""
+                    if match_text(item_text, description, search_text, use_regex, case_sensitive, whole_word):
+                        results.append((item_text, f"收藏夹-{folder_name}", i, description))
+        elif scope in ["全部", "当前收藏夹", "所有收藏夹"]:
+            # 确定要搜索的收藏夹
+            folders_to_search = []
+            if scope == "当前收藏夹":
+                folders_to_search = [self.current_folder]
+            else:  # "全部" 或 "所有收藏夹"
+                folders_to_search = list(self.favorites.keys())
+            
+            # 搜索每个收藏夹
+            for folder_name in folders_to_search:
+                for i, item in enumerate(self.favorites[folder_name]):
+                    item_text = item["text"] if isinstance(item, dict) else str(item)
+                    description = item.get("description", "") if isinstance(item, dict) else ""
+                    if match_text(item_text, description, search_text, use_regex, case_sensitive, whole_word):
+                        # 如果是描述匹配但内容不匹配，添加标记
+                        match_in_desc_only = False
+                        if description and not self.normal_search(item_text, search_text, case_sensitive, whole_word):
+                            match_in_desc_only = True
+                        
+                        results.append((item_text, f"收藏夹-{folder_name}", i, description))
+        
+        return results
+    
+    def normal_search(self, text, pattern, is_case_sensitive, is_whole_word):
+        """执行普通文本搜索"""
+        if not is_case_sensitive:
+            text = text.lower()
+            pattern = pattern.lower()
+        
+        if is_whole_word:
+            # 全字匹配
+            words = re.findall(r'\b\w+\b', text)
+            return pattern in words
+        else:
+            # 普通包含匹配
+            return pattern in text
+    
+    def handle_search_hotkey_error(self, error_msg=""):
+        """处理搜索热键错误"""
+        print(f"搜索热键错误，正在重新初始化: {error_msg}")
+        try:
+            self.search_hotkey_thread.stop()
+            self.search_hotkey_thread.wait(1000)
+            
+            if self.search_hotkey_thread.isRunning():
+                print("强制终止搜索热键线程")
+                self.search_hotkey_thread.terminate()
+                self.search_hotkey_thread.wait()
+        except Exception as e:
+            print(f"停止搜索热键线程时出错: {e}")
+        
+        # 创建新的热键线程
+        self.search_hotkey_thread = HotkeyThread('ctrl+alt+a')
+        self.search_hotkey_thread.triggered.connect(self.show_search_dialog)
+        self.search_hotkey_thread.error.connect(self.handle_search_hotkey_error)
+        self.search_hotkey_thread.start()
+        
+        # 显示通知
+        self.tray_icon.showMessage("搜索热键已重置", "快捷键 ctrl+alt+a 已重新注册", QSystemTrayIcon.MessageIcon.Information, 3000)
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径"""
