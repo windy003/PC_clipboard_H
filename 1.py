@@ -9,6 +9,7 @@ import os
 import keyboard
 import time
 import re
+import traceback
 
 # 修改热键线程的实现
 class HotkeyThread(QThread):
@@ -761,6 +762,12 @@ class SearchDialog(QDialog):
                 new_description = dialog.get_description()
                 new_content = dialog.get_content()
                 
+                print(f"编辑项目: 源={source}, 索引={original_index}")
+                print(f"原内容: {text}")
+                print(f"原描述: {description}")
+                print(f"新内容: {new_content}")
+                print(f"新描述: {new_description}")
+                
                 # 更新内容
                 if source == "历史记录":
                     # 更新历史记录
@@ -771,46 +778,45 @@ class SearchDialog(QDialog):
                     truncated_text = self.parent_app.truncate_text(new_content)
                     self.parent_app.history_list.item(original_index).setText(f"{original_index+1}. {truncated_text}")
                     
-                    # 更新搜索结果
+                    # 更新搜索结果 - 历史记录项不保存描述信息
                     self.results[index] = (new_content, source, original_index, "")
                     
                 elif source.startswith("收藏夹-"):
-                    # 更新收藏夹
-                    folder_name = source[5:]  # 去掉前缀 "收藏夹-"
+                    # 更新收藏夹 - 修正这里的处理方式
+                    folder_name = source[4:]  # 修改这里，完整提取"收藏夹-"后面的内容
+                    print(f"完整收藏夹名称: {folder_name}")
+                    print(f"收藏夹是否存在: {folder_name in self.parent_app.favorites}")
+                    
                     if folder_name in self.parent_app.favorites:
-                        item = self.parent_app.favorites[folder_name][original_index]
-                        if isinstance(item, dict):
-                            item["text"] = new_content
-                            item["description"] = new_description
-                        else:
-                            # 如果是旧格式，转换为新格式
-                            self.parent_app.favorites[folder_name][original_index] = {
+                        print(f"收藏夹 {folder_name} 中的项目数: {len(self.parent_app.favorites[folder_name])}")
+                        print(f"要更新的索引: {original_index}")
+                        
+                        # 检查索引是否有效
+                        if original_index < len(self.parent_app.favorites[folder_name]):
+                            # 确保使用字典格式保存
+                            new_item = {
                                 "text": new_content,
                                 "description": new_description
                             }
-                        
-                        # 保存更改
-                        self.parent_app.save_favorites()
-                        
-                        # 如果当前显示的是该收藏夹，更新显示
-                        if self.parent_app.current_folder == folder_name:
-                            truncated_text = self.parent_app.truncate_text(new_content)
-                            self.parent_app.favorites_list.item(original_index).setText(f"{original_index+1}. {truncated_text}")
-                        
-                        # 更新搜索结果
-                        self.results[index] = (new_content, source, original_index, new_description)
-                
-                # 更新搜索结果列表显示
-                context = self.get_keyword_context(new_content, self.search_input.text(), 
-                                                 self.regex_checkbox.isChecked(), 
-                                                 self.case_sensitive_checkbox.isChecked())
-                item_text = f"{index+1}. [{source}] {context}"
-                if new_description:
-                    item_text += " [有描述]"
-                self.results_list.item(index).setText(item_text)
-                
-                # 更新预览
-                self.show_preview(self.results_list.currentItem(), None)
+                            
+                            # 更新收藏夹中的内容
+                            self.parent_app.favorites[folder_name][original_index] = new_item
+                            
+                            # 立即保存更改到文件
+                            self.parent_app.save_favorites()
+                            
+                            # 如果当前显示的是该收藏夹，更新显示
+                            if self.parent_app.current_folder == folder_name:
+                                truncated_text = self.parent_app.truncate_text(new_content)
+                                self.parent_app.favorites_list.item(original_index).setText(f"{original_index+1}. {truncated_text}")
+                            
+                            # 更新搜索结果 - 包含描述信息
+                            self.results[index] = (new_content, source, original_index, new_description)
+                        else:
+                            print(f"错误: 索引 {original_index} 超出范围 (0-{len(self.parent_app.favorites[folder_name])-1})")
+                    else:
+                        print(f"错误: 找不到收藏夹 '{folder_name}'")
+                        print(f"可用的收藏夹: {list(self.parent_app.favorites.keys())}")
     
     def add_to_favorites(self, text):
         """添加文本到当前收藏夹"""
@@ -1929,11 +1935,43 @@ class ClipboardHistoryApp(QMainWindow):
     def save_favorites(self):
         """保存收藏记录到文件"""
         try:
+            print(f"开始保存收藏夹...")
+            print(f"收藏夹文件路径: {self.favorites_file}")
+            print(f"收藏夹数量: {len(self.favorites)}")
+            
+            # 确保所有收藏夹中的项目都使用字典格式
+            for folder_name in self.favorites:
+                print(f"处理收藏夹: {folder_name}, 项目数: {len(self.favorites[folder_name])}")
+                for i, item in enumerate(self.favorites[folder_name]):
+                    if not isinstance(item, dict):
+                        print(f"  将项目 {i} 转换为字典格式: {item}")
+                        self.favorites[folder_name][i] = {
+                            "text": str(item),
+                            "description": ""
+                        }
+            
+            # 保存到文件
             with open(self.favorites_file, 'w', encoding='utf-8') as f:
                 json.dump(self.favorites, f, ensure_ascii=False, indent=2)
-            print(f"收藏已保存到: {self.favorites_file}")  # 调试信息
+            print(f"收藏已成功保存到: {self.favorites_file}")
+            
+            # 验证文件是否存在
+            if os.path.exists(self.favorites_file):
+                print(f"文件存在，大小: {os.path.getsize(self.favorites_file)} 字节")
+            else:
+                print(f"警告: 文件保存后不存在!")
+            
+            # 尝试重新加载文件以验证
+            try:
+                with open(self.favorites_file, 'r', encoding='utf-8') as f:
+                    test_data = json.load(f)
+                print(f"验证: 成功读取文件，包含 {len(test_data)} 个收藏夹")
+            except Exception as e:
+                print(f"验证读取失败: {e}")
+            
         except Exception as e:
-            print(f"保存收藏记录时出错: {e}")  # 调试信息
+            print(f"保存收藏记录时出错: {e}")
+            traceback.print_exc()
 
     def truncate_text(self, text, max_length=50):
         """截断文本，保留定长度添加省略号"""
