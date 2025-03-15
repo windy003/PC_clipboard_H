@@ -923,91 +923,84 @@ class SearchDialog(QDialog):
             QMessageBox.warning(self, "搜索错误", f"搜索时发生错误: {str(e)}")
     
     def fill_results(self):
-        """填充搜索结果到列表"""
+        """填充搜索结果列表"""
         self.results_list.clear()
         
         for i, (text, source, original_index, description) in enumerate(self.results):
-            # 获取关键词上下文
+            # 获取关键字上下文，同时传入描述
             context = self.get_keyword_context(
                 text, 
                 self.search_input.text(), 
-                self.regex_checkbox.isChecked(),
-                self.case_sensitive_checkbox.isChecked()
+                self.regex_checkbox.isChecked(), 
+                self.case_sensitive_checkbox.isChecked(),
+                description
             )
             
-            # 创建列表项
+            # 构建显示文本
             item_text = f"{i+1}. [{source}] {context}"
-            if description:
-                item_text += " [有描述]"
             
+            # 如果有描述，添加标记
+            if description and "[描述]" not in context:
+                item_text += " [有描述]"
+                
             self.results_list.addItem(item_text)
         
         # 如果有结果，选中第一项
         if self.results_list.count() > 0:
             self.results_list.setCurrentRow(0)
     
-    def get_keyword_context(self, text, keyword, use_regex=False, case_sensitive=False):
-        """获取关键词上下文"""
-        context_length = 20  # 关键词前后显示的字符数
-        
+    def get_keyword_context(self, text, keyword, use_regex=False, case_sensitive=False, description=""):
+        """获取关键字在文本中的上下文"""
         if not keyword:
-            return self.parent_app.truncate_text(text)
+            return text[:50] + "..." if len(text) > 50 else text
         
-        if use_regex:
-            try:
-                flags = 0 if case_sensitive else re.IGNORECASE
-                pattern = re.compile(keyword, flags)
-                match = pattern.search(text)
-                
-                if match:
-                    start, end = match.span()
-                    # 获取关键词前后的文本
-                    prefix = text[max(0, start - context_length):start]
-                    suffix = text[end:min(len(text), end + context_length)]
-                    
-                    # 如果前缀不是从文本开头开始，添加省略号
-                    if start > context_length:
-                        prefix = "..." + prefix
-                    
-                    # 如果后缀不是到文本结尾，添加省略号
-                    if end + context_length < len(text):
-                        suffix = suffix + "..."
-                    
-                    # 返回带有关键词上下文的文本
-                    return f"{prefix}<b>{text[start:end]}</b>{suffix}"
-                else:
-                    return self.parent_app.truncate_text(text)
-            except Exception:
-                return self.parent_app.truncate_text(text)
-        else:
-            # 非正则表达式搜索
-            if not case_sensitive:
-                text_lower = text.lower()
-                keyword_lower = keyword.lower()
-                index = text_lower.find(keyword_lower)
+        # 定义搜索函数
+        def find_match(search_text, pattern):
+            if use_regex:
+                try:
+                    flags = 0 if case_sensitive else re.IGNORECASE
+                    regex = re.compile(pattern, flags)
+                    match = regex.search(search_text)
+                    return match
+                except:
+                    return None
             else:
-                index = text.find(keyword)
+                if not case_sensitive:
+                    search_text = search_text.lower()
+                    pattern = pattern.lower()
+                
+                pos = search_text.find(pattern)
+                if pos >= 0:
+                    return type('Match', (), {'start': lambda: pos, 'end': lambda: pos + len(pattern)})
+                return None
+        
+        # 首先检查内容中是否有匹配
+        content_match = find_match(text, keyword)
+        
+        # 如果内容中有匹配，返回内容中的上下文
+        if content_match:
+            start_pos = max(0, content_match.start() - 20)
+            end_pos = min(len(text), content_match.end() + 20)
             
-            if index != -1:
-                # 获取关键词前后的文本
-                start = index
-                end = index + len(keyword)
+            prefix = "..." if start_pos > 0 else ""
+            suffix = "..." if end_pos < len(text) else ""
+            
+            return prefix + text[start_pos:end_pos] + suffix
+        
+        # 如果内容中没有匹配但有描述，检查描述中是否有匹配
+        if description:
+            desc_match = find_match(description, keyword)
+            if desc_match:
+                start_pos = max(0, desc_match.start() - 20)
+                end_pos = min(len(description), desc_match.end() + 20)
                 
-                prefix = text[max(0, start - context_length):start]
-                suffix = text[end:min(len(text), end + context_length)]
+                prefix = "..." if start_pos > 0 else ""
+                suffix = "..." if end_pos < len(description) else ""
                 
-                # 如果前缀不是从文本开头开始，添加省略号
-                if start > context_length:
-                    prefix = "..." + prefix
-                
-                # 如果后缀不是到文本结尾，添加省略号
-                if end + context_length < len(text):
-                    suffix = suffix + "..."
-                
-                # 返回带有关键词上下文的文本
-                return f"{prefix}<b>{text[start:end]}</b>{suffix}"
-            else:
-                return self.parent_app.truncate_text(text)
+                return "[描述] " + prefix + description[start_pos:end_pos] + suffix
+        
+        # 如果都没有匹配，返回内容的前50个字符
+        return text[:50] + "..." if len(text) > 50 else text
     
     def use_selected(self):
         """使用选中的搜索结果"""
@@ -1513,7 +1506,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/3/15-01")
+        version_action = tray_menu.addAction("版本: 2025/3/15-03")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
