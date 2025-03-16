@@ -568,7 +568,7 @@ class SearchDialog(QDialog):
         layout.addLayout(button_layout)
         
         # 存储搜索结果
-        self.results = []
+        self.results = []  # 确保初始化 results 列表
         
         # 创建悬浮预览窗口
         self.preview_window = QWidget(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
@@ -680,43 +680,26 @@ class SearchDialog(QDialog):
         self.perform_search()
     
     def show_preview(self, current, previous):
-        """显示选中项的预览"""
+        """显示选中条目的预览"""
         if not current:
             self.preview_window.hide()
             return
         
         index = self.results_list.currentRow()
         if 0 <= index < len(self.results):
-            text, source, original_index, description = self.results[index]
-            
-            # 设置预览内容
-            self.preview_content.setHtml(f"<pre style='white-space: pre-wrap; word-wrap: break-word;'>{text}</pre>")
-            
-            # 设置描述内容（如果有）
-            if description:
-                self.preview_desc.setHtml(f"<pre style='white-space: pre-wrap; word-wrap: break-word;'>{description}</pre>")
-                self.preview_desc_label.show()
-                self.preview_desc.show()
-            else:
-                self.preview_desc_label.hide()
-                self.preview_desc.hide()
-            
-            # 计算预览窗口位置
-            pos = self.mapToGlobal(self.rect().topRight())
-            screen_rect = QApplication.primaryScreen().geometry()
-            
-            # 确保预览窗口不会超出屏幕边界
-            window_width = self.preview_window.width()
-            window_height = self.preview_window.height()
-            
-            if pos.x() + window_width > screen_rect.right():
-                pos.setX(screen_rect.right() - window_width)
-            
-            if pos.y() + window_height > screen_rect.bottom():
-                pos.setY(screen_rect.bottom() - window_height)
-            
-            self.preview_window.move(pos)
-            self.preview_window.show()
+            try:
+                # 修改这里：只解包三个值
+                source, text, description = self.results[index]
+                
+                # 设置预览内容
+                if hasattr(self, 'preview_window'):
+                    self.preview_window.set_content(text, description)
+                    self.preview_window.show()
+                
+            except Exception as e:
+                print(f"显示预览时出错: {e}")
+                if hasattr(self, 'preview_window'):
+                    self.preview_window.hide()
         else:
             self.preview_window.hide()
     
@@ -754,7 +737,8 @@ class SearchDialog(QDialog):
         """编辑选中的搜索结果项"""
         index = self.results_list.currentRow()
         if 0 <= index < len(self.results):
-            text, source, original_index, description = self.results[index]
+            # 修改这里：只解包三个值
+            source, text, description = self.results[index]
             
             # 创建编辑对话框
             dialog = DescriptionDialog(self, text=text, description=description)
@@ -763,7 +747,7 @@ class SearchDialog(QDialog):
                 new_description = dialog.get_description()
                 new_content = dialog.get_content()
                 
-                print(f"编辑项目: 源={source}, 索引={original_index}")
+                print(f"编辑项目: 源={source}, 索引={index}")
                 print(f"原内容: {text}")
                 print(f"原描述: {description}")
                 print(f"新内容: {new_content}")
@@ -772,15 +756,15 @@ class SearchDialog(QDialog):
                 # 更新内容
                 if source == "历史记录":
                     # 更新历史记录
-                    self.parent_app.clipboard_history[original_index] = new_content
+                    self.parent_app.clipboard_history[index] = new_content
                     self.parent_app.save_history()
                     
                     # 更新显示
                     truncated_text = self.parent_app.truncate_text(new_content)
-                    self.parent_app.history_list.item(original_index).setText(f"{original_index+1}. {truncated_text}")
+                    self.parent_app.history_list.item(index).setText(f"{index+1}. {truncated_text}")
                     
                     # 更新搜索结果 - 历史记录项不保存描述信息
-                    self.results[index] = (new_content, source, original_index, "")
+                    self.results[index] = (new_content, source, index, "")
                     
                 elif source.startswith("收藏夹-"):
                     # 更新收藏夹 - 修正这里的处理方式
@@ -790,10 +774,10 @@ class SearchDialog(QDialog):
                     
                     if folder_name in self.parent_app.favorites:
                         print(f"收藏夹 {folder_name} 中的项目数: {len(self.parent_app.favorites[folder_name])}")
-                        print(f"要更新的索引: {original_index}")
+                        print(f"要更新的索引: {index}")
                         
                         # 检查索引是否有效
-                        if original_index < len(self.parent_app.favorites[folder_name]):
+                        if index < len(self.parent_app.favorites[folder_name]):
                             # 确保使用字典格式保存
                             new_item = {
                                 "text": new_content,
@@ -801,7 +785,7 @@ class SearchDialog(QDialog):
                             }
                             
                             # 更新收藏夹中的内容
-                            self.parent_app.favorites[folder_name][original_index] = new_item
+                            self.parent_app.favorites[folder_name][index] = new_item
                             
                             # 立即保存更改到文件
                             self.parent_app.save_favorites()
@@ -809,12 +793,12 @@ class SearchDialog(QDialog):
                             # 如果当前显示的是该收藏夹，更新显示
                             if self.parent_app.current_folder == folder_name:
                                 truncated_text = self.parent_app.truncate_text(new_content)
-                                self.parent_app.favorites_list.item(original_index).setText(f"{original_index+1}. {truncated_text}")
+                                self.parent_app.favorites_list.item(index).setText(f"{index+1}. {truncated_text}")
                             
                             # 更新搜索结果 - 包含描述信息
-                            self.results[index] = (new_content, source, original_index, new_description)
+                            self.results[index] = (new_content, source, index, new_description)
                         else:
-                            print(f"错误: 索引 {original_index} 超出范围 (0-{len(self.parent_app.favorites[folder_name])-1})")
+                            print(f"错误: 索引 {index} 超出范围 (0-{len(self.parent_app.favorites[folder_name])-1})")
                     else:
                         print(f"错误: 找不到收藏夹 '{folder_name}'")
                         print(f"可用的收藏夹: {list(self.parent_app.favorites.keys())}")
@@ -897,24 +881,14 @@ class SearchDialog(QDialog):
         """填充搜索结果列表"""
         self.results_list.clear()
         
-        for i, (text, source, original_index, description) in enumerate(self.results):
-            # 获取关键字上下文，同时传入描述
-            context = self.get_keyword_context(
-                text, 
-                self.search_input.text(), 
-                self.regex_checkbox.isChecked(), 
-                self.case_sensitive_checkbox.isChecked(),
-                description
-            )
-            
+        for i, (source, text, description) in enumerate(self.results):
             # 构建显示文本
-            item_text = f"{i+1}. [{source}] {context}"
+            display_text = f"{i+1}. [{source}] {text}"
+            if description:
+                display_text += " [有描述]"
             
-            # 如果有描述，添加标记
-            if description and "[描述]" not in context:
-                item_text += " [有描述]"
-                
-            self.results_list.addItem(item_text)
+            # 添加到结果列表
+            self.results_list.addItem(display_text)
         
         # 如果有结果，选中第一项
         if self.results_list.count() > 0:
@@ -1011,7 +985,8 @@ class SearchDialog(QDialog):
         """将选中的项目粘贴到当前活动窗口"""
         index = self.results_list.currentRow()
         if 0 <= index < len(self.results):
-            text = self.results[index][0]  # 获取选中项的文本内容
+            # 修改这里：只解包三个值
+            source, text, description = self.results[index]
             
             try:
                 # 保存当前剪贴板内容
@@ -1373,8 +1348,8 @@ class ClipboardHistoryApp(QMainWindow):
         self.preview_window = PreviewWindow()
         
         # 为两个列表添加选择变化事件
-        self.history_list.currentItemChanged.connect(self.show_preview)
-        self.favorites_list.currentItemChanged.connect(self.show_preview)
+        self.history_list.currentItemChanged.connect(self.show_item_preview)
+        self.favorites_list.currentItemChanged.connect(self.show_item_preview)
         
         # 设置列表项为单行显示
         self.history_list.setWordWrap(False)  # 禁用自动换行
@@ -1985,56 +1960,42 @@ class ClipboardHistoryApp(QMainWindow):
             return text[:max_length] + "..."
         return text
 
-    def show_preview(self, current, previous):
-        """显示选中条目的完整内容"""
+    def show_item_preview(self, current, previous):  # 重命名这个方法
+        """显示主窗口中选中条目的预览"""
         if not current:
             self.preview_window.hide()
             return
         
-        current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
-        current_row = current_list.currentRow()
-        
         try:
-            if self.stacked_widget.currentIndex() == 0:
-                # 历史记录面板
-                data_list = self.clipboard_history
-                original_text = data_list[current_row]
-                description = ""
-            else:
-                # 收藏夹面板
-                data_list = self.favorites[self.current_folder]
-                item = data_list[current_row]
-                # 处理新旧格式数据
-                if isinstance(item, str):
-                    original_text = item
+            # 确定当前激活的列表
+            current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
+            current_row = current_list.currentRow()
+            
+            if current_row >= 0:
+                if self.stacked_widget.currentIndex() == 0:
+                    # 从历史记录获取内容
+                    text = self.clipboard_history[current_row]
                     description = ""
                 else:
-                    original_text = item["text"]
-                    description = item.get("description", "")
-            
-            if 0 <= current_row < len(data_list):
-                # 移除条件判断，总是显示预览窗口
-                self.preview_window.set_content(original_text, description)
+                    # 从收藏夹获取内容
+                    item = self.favorites[self.current_folder][current_row]
+                    if isinstance(item, dict):
+                        text = item.get("text", "")
+                        description = item.get("description", "")
+                    else:
+                        text = str(item)
+                        description = ""
                 
-                # 计算预览窗口的位置
-                screen = QApplication.primaryScreen().geometry()
-                preview_width = self.preview_window.width()
+                # 设置预览内容
+                self.preview_window.set_content(text, description)
                 
-                # 计算预览窗口的理想x坐标
-                ideal_x = self.x() + self.width() + 10
-                
-                # 如果预览窗口会超出屏幕右边界，则将其放在主窗口左侧
-                if ideal_x + preview_width > screen.right():
-                    preview_x = self.x() - preview_width - 10
-                else:
-                    preview_x = ideal_x
-                
-                preview_y = self.y()
-                
-                self.preview_window.move(preview_x, preview_y)
+                # 显示预览窗口
                 self.preview_window.show()
+            else:
+                self.preview_window.hide()
+                
         except Exception as e:
-            print(f"预览显示错误: {e}")
+            print(f"显示预览时出错: {e}")
             self.preview_window.hide()
 
     def hide(self):
@@ -2352,73 +2313,71 @@ class ClipboardHistoryApp(QMainWindow):
         """搜索项目"""
         results = []
         
-        # 定义搜索函数
-        def match_text(text, description, pattern, is_regex, is_case_sensitive, is_whole_word):
-            # 首先检查文本内容是否匹配
-            text_match = False
-            desc_match = False
+        try:
+            # 根据搜索范围确定要搜索的内容
+            if scope in ["全部", "历史记录"]:
+                # 搜索历史记录
+                for i, item in enumerate(self.clipboard_history):
+                    # 确保我们使用原始文本内容
+                    text = item
+                    if isinstance(item, dict):
+                        text = item.get("text", "")
+                        description = item.get("description", "")
+                    else:
+                        text = str(item)  # 确保是字符串
+                        description = ""
+                    
+                    # 清理文本，移除可能的格式化标记
+                    clean_text = text
+                    if clean_text.startswith("[历史记录]"):
+                        clean_text = clean_text.replace("[历史记录]", "").strip()
+                    
+                    if self.match_text(clean_text, description, search_text, use_regex, case_sensitive, whole_word):
+                        # 存储干净的文本内容
+                        results.append(("历史记录", clean_text, description))
             
-            if is_regex:
-                try:
-                    # 正则表达式搜索
-                    flags = 0 if is_case_sensitive else re.IGNORECASE
-                    if is_whole_word:
-                        # 全字匹配的正则表达式
-                        pattern = r'\b' + pattern + r'\b'
-                    text_match = bool(re.search(pattern, text, flags))
-                    if description:
-                        desc_match = bool(re.search(pattern, description, flags))
-                except re.error:
-                    # 正则表达式错误，使用普通搜索
-                    text_match = self.normal_search(text, pattern, is_case_sensitive, is_whole_word)
-                    if description:
-                        desc_match = self.normal_search(description, pattern, is_case_sensitive, is_whole_word)
-            else:
-                # 普通搜索
-                text_match = self.normal_search(text, pattern, is_case_sensitive, is_whole_word)
-                if description:
-                    desc_match = self.normal_search(description, pattern, is_case_sensitive, is_whole_word)
+            # 搜索收藏夹的代码保持不变
+            if scope in ["全部", "所有收藏夹"] or scope.startswith("收藏夹-"):
+                folder_name = scope[4:] if scope.startswith("收藏夹-") else None
+                folders_to_search = [folder_name] if folder_name else self.favorites.keys()
+                
+                for folder in folders_to_search:
+                    if folder in self.favorites:
+                        for item in self.favorites[folder]:
+                            if isinstance(item, dict):
+                                text = item.get("text", "")
+                                description = item.get("description", "")
+                            else:
+                                text = str(item)
+                                description = ""
+                            
+                            if self.match_text(text, description, search_text, use_regex, case_sensitive, whole_word):
+                                results.append((f"收藏夹-{folder}", text, description))
             
-            return text_match or desc_match
-        
-        # 搜索历史记录
-        if scope in ["全部", "历史记录"]:
-            for i, text in enumerate(self.clipboard_history):
-                if match_text(text, "", search_text, use_regex, case_sensitive, whole_word):
-                    results.append((text, "历史记录", i, ""))
-        
-        # 搜索收藏夹
-        if scope.startswith("收藏夹: "):
-            # 搜索特定收藏夹
-            folder_name = scope[5:]  # 去掉前缀 "收藏夹: "
-            if folder_name in self.favorites:
-                for i, item in enumerate(self.favorites[folder_name]):
-                    item_text = item["text"] if isinstance(item, dict) else str(item)
-                    description = item.get("description", "") if isinstance(item, dict) else ""
-                    if match_text(item_text, description, search_text, use_regex, case_sensitive, whole_word):
-                        results.append((item_text, f"收藏夹-{folder_name}", i, description))
-        elif scope in ["全部", "当前收藏夹", "所有收藏夹"]:
-            # 确定要搜索的收藏夹
-            folders_to_search = []
-            if scope == "当前收藏夹":
-                folders_to_search = [self.current_folder]
-            else:  # "全部" 或 "所有收藏夹"
-                folders_to_search = list(self.favorites.keys())
+            print(f"搜索结果数量: {len(results)}")
+            return results
             
-            # 搜索每个收藏夹
-            for folder_name in folders_to_search:
-                for i, item in enumerate(self.favorites[folder_name]):
-                    item_text = item["text"] if isinstance(item, dict) else str(item)
-                    description = item.get("description", "") if isinstance(item, dict) else ""
-                    if match_text(item_text, description, search_text, use_regex, case_sensitive, whole_word):
-                        # 如果是描述匹配但内容不匹配，添加标记
-                        match_in_desc_only = False
-                        if description and not self.normal_search(item_text, search_text, case_sensitive, whole_word):
-                            match_in_desc_only = True
-                        
-                        results.append((item_text, f"收藏夹-{folder_name}", i, description))
-        
-        return results
+        except Exception as e:
+            import traceback
+            print(f"搜索错误详情: {traceback.format_exc()}")
+            raise e
+    
+    def match_text(self, text, description, pattern, use_regex, case_sensitive, whole_word):
+        """匹配文本"""
+        if use_regex:
+            try:
+                # 正则表达式搜索
+                flags = 0 if case_sensitive else re.IGNORECASE
+                if whole_word:
+                    # 全字匹配的正则表达式
+                    pattern = r'\b' + pattern + r'\b'
+                return bool(re.search(pattern, text, flags))
+            except re.error:
+                # 正则表达式错误，使用普通搜索
+                return self.normal_search(text, pattern, case_sensitive, whole_word)
+        else:
+            # 普通搜索
+            return self.normal_search(text, pattern, case_sensitive, whole_word)
     
     def normal_search(self, text, pattern, is_case_sensitive, is_whole_word):
         """执行普通文本搜索"""
