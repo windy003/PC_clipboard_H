@@ -834,6 +834,10 @@ class SearchDialog(QDialog):
             if self.results_list.currentRow() >= 0:
                 self.paste_selected()
                 self.accept()  # 粘贴后关闭对话框
+        elif event.key() == Qt.Key.Key_C and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
+            # 如果按下 Ctrl+C，并且有选中的项目，则执行复制操作
+            if self.results_list.currentRow() >= 0:
+                self.copy_selected()
         else:
             super().keyPressEvent(event)
     
@@ -841,7 +845,8 @@ class SearchDialog(QDialog):
         """复制选中项到剪贴板"""
         index = self.results_list.currentRow()
         if 0 <= index < len(self.results):
-            text = self.results[index][0]
+            # 修改这里：只解包三个值
+            source, text, description = self.results[index]
             QApplication.clipboard().setText(text)
             # 显示复制成功提示
             QMessageBox.information(self, "复制成功", "文本已复制到剪贴板")
@@ -987,7 +992,9 @@ class SearchDialog(QDialog):
         if 0 <= index < len(self.results):
             # 修改这里：只解包三个值
             source, text, description = self.results[index]
-            
+            print(f"index: {index}")
+            print(f"self.results[index]: {self.results[index]}")
+            print(f"source: {source}, text: {text}, description: {description}")    
             try:
                 # 保存当前剪贴板内容
                 old_clipboard = QApplication.clipboard().text()
@@ -1490,7 +1497,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/3/16-01")
+        version_action = tray_menu.addAction("版本: 2025/3/16-02")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
