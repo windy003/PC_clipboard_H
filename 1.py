@@ -1058,14 +1058,52 @@ class ClipboardHistoryApp(QMainWindow):
         self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.history_list.customContextMenuRequested.connect(self.show_history_context_menu)
         self.history_list.keyPressEvent = self.list_key_press
+        # 添加样式
+        self.history_list.setStyleSheet("""
+            QListWidget {
+                padding: 5px;
+            }
+            QListWidget::item {
+                padding: 2px;
+                margin: 2px 0px;
+                border-radius: 4px;
+                background-color: #f8f9fa;
+            }
+            QListWidget::item:selected {
+                background-color: #e3f2fd;
+                color: #1976d2;
+            }
+            QListWidget::item:hover {
+                background-color: #f5f5f5;
+            }
+        """)
         self.stacked_widget.addWidget(self.history_list)
         
         # 创建收藏列表
         self.favorites_list = QListWidget()
         self.favorites_list.keyPressEvent = self.list_key_press
-        self.favorites_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)  # 启用内部拖拽
-        self.favorites_list.setDefaultDropAction(Qt.DropAction.MoveAction)  # 设置默认拖拽动作为移动
-        self.favorites_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)  # 单选模式
+        self.favorites_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+        self.favorites_list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.favorites_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        # 添加相同的样式
+        self.favorites_list.setStyleSheet("""
+            QListWidget {
+                padding: 5px;
+            }
+            QListWidget::item {
+                padding: 2px;
+                margin: 2px 0px;
+                border-radius: 4px;
+                background-color: #f8f9fa;
+            }
+            QListWidget::item:selected {
+                background-color: #e3f2fd;
+                color: #1976d2;
+            }
+            QListWidget::item:hover {
+                background-color: #f5f5f5;
+            }
+        """)
         self.favorites_list.model().rowsMoved.connect(self.on_favorites_reordered)  # 连接重排序信号
         self.stacked_widget.addWidget(self.favorites_list)
         
@@ -1360,7 +1398,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/3/16-02")
+        version_action = tray_menu.addAction("版本: 2025/3/20-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
