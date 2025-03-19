@@ -336,38 +336,122 @@ class DescriptionDialog(QDialog):
         return self.description_edit.toPlainText()
 
 class PreviewWindow(QWidget):
+    """悬浮预览窗口"""
     def __init__(self, parent=None):
-        super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-        self.setMinimumSize(500, 400)
+        super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
         self.setStyleSheet("""
             QWidget {
-                background-color: #f8f8f8;
-                border: 1px solid #ddd;
-                border-radius: 4px;
+                background-color: #f0f0f0;
+                border: 1px solid #ccc;
+                border-radius: 5px;
             }
             QTextEdit {
-                background-color: white;
-                border: 1px solid #ddd;
-                border-radius: 4px;
+                border: none;
+                background-color: transparent;
                 padding: 5px;
             }
             QLabel {
-                font-weight: bold;
-                color: #333;
+                color: #666;
+                padding: 5px;
+            }
+            QFrame#line {
+                background-color: #ccc;
+            }
+            QScrollBar:vertical {
+                border: none;
+                background: #f0f0f0;
+                width: 10px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #ccc;
+                border-radius: 5px;
+                min-height: 20px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar:horizontal {
+                border: none;
+                background: #f0f0f0;
+                height: 10px;
+                margin: 0px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #ccc;
+                border-radius: 5px;
+                min-width: 20px;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                width: 0px;
             }
         """)
         
-        # 创建布局
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(5)
         
-        # 创建内容显示区域
-        self.content = QTextEdit()
-        self.content.setReadOnly(True)
-        layout.addWidget(self.content)
+        # 创建一个滚动区域
+        scroll_area = QScrollArea(self)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        
+        # 创建一个容器widget来放置所有内容
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(5)
+        
+        # 描述信息显示
+        self.description_label = QLabel("描述:")
+        container_layout.addWidget(self.description_label)
+        self.description_edit = QTextEdit()
+        self.description_edit.setReadOnly(True)
+        self.description_edit.setMaximumHeight(100)
+        self.description_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.description_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        container_layout.addWidget(self.description_edit)
+        
+        # 添加分界线
+        self.separator = QFrame()
+        self.separator.setObjectName("line")
+        self.separator.setFrameShape(QFrame.Shape.HLine)
+        self.separator.setFrameShadow(QFrame.Shadow.Sunken)
+        self.separator.setFixedHeight(2)
+        container_layout.addWidget(self.separator)
+        
+        # 内容标题和显示
+        self.content_label = QLabel("内容信息:")
+        container_layout.addWidget(self.content_label)
+        self.text_edit = QTextEdit()
+        self.text_edit.setReadOnly(True)
+        self.text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.text_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        container_layout.addWidget(self.text_edit)
+        
+        # 设置弹性空间
+        container_layout.addStretch()
+        
+        # 将容器放入滚动区域
+        scroll_area.setWidget(container)
+        layout.addWidget(scroll_area)
+        
+        self.setMinimumSize(300, 200)
+        self.setMaximumSize(400, 600)  # 增加最大高度
     
     def set_content(self, text, description=""):
-        """设置预览内容"""
-        self.content.setText(text)
+        self.text_edit.setText(text)
+        if description:
+            self.description_label.show()
+            self.description_edit.show()
+            self.description_edit.setText(description)
+            self.separator.show()
+        else:
+            self.description_label.hide()
+            self.description_edit.hide()
+            self.separator.hide()
 
 class EditItemDialog(QDialog):
     """编辑条目对话框"""
@@ -601,29 +685,58 @@ class SearchDialog(QDialog):
         self.perform_search()
     
     def show_preview(self, current, previous):
-        """显示选中条目的预览"""
+        """显示选中条目的完整内容"""
         if not current:
             self.preview_window.hide()
             return
         
-        index = self.results_list.currentRow()
-        if 0 <= index < len(self.results):
-            try:
-                # 修改这里：只解包三个值
-                source, text, description = self.results[index]
+        current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
+        current_row = current_list.currentRow()
+        
+        try:
+            if self.stacked_widget.currentIndex() == 0:
+                # 历史记录面板
+                data_list = self.clipboard_history
+                original_text = data_list[current_row]
+                description = ""
+            else:
+                # 收藏夹面板
+                data_list = self.favorites[self.current_folder]
+                item = data_list[current_row]
+                # 处理新旧格式数据
+                if isinstance(item, str):
+                    original_text = item
+                    description = ""
+                else:
+                    original_text = item["text"]
+                    description = item.get("description", "")
+            
+            if 0 <= current_row < len(data_list):
+                # 移除条件判断，总是显示预览窗口
+                self.preview_window.set_content(original_text, description)
                 
-                # 设置预览内容
-                if hasattr(self, 'preview_window'):
-                    self.preview_window.set_content(text, description)
-                    self.preview_window.show()
+                # 计算预览窗口的位置
+                screen = QApplication.primaryScreen().geometry()
+                preview_width = self.preview_window.width()
                 
-            except Exception as e:
-                print(f"显示预览时出错: {e}")
-                if hasattr(self, 'preview_window'):
-                    self.preview_window.hide()
-        else:
+                # 计算预览窗口的理想x坐标
+                ideal_x = self.x() + self.width() + 10
+                
+                # 如果预览窗口会超出屏幕右边界，则将其放在主窗口左侧
+                if ideal_x + preview_width > screen.right():
+                    preview_x = self.x() - preview_width - 10
+                else:
+                    preview_x = ideal_x
+                
+                preview_y = self.y()
+                
+                self.preview_window.move(preview_x, preview_y)
+                self.preview_window.show()
+        except Exception as e:
+            print(f"预览显示错误: {e}")
             self.preview_window.hide()
-    
+
+
     def show_results_context_menu(self, position):
         """显示搜索结果的右键菜单"""
         menu = QMenu()
@@ -949,164 +1062,6 @@ class SearchDialog(QDialog):
         except Exception as e:
             print(f"执行粘贴操作时出错: {e}")
 
-class DescriptionDialog(QDialog):
-    """描述对话框，用于编辑内容和描述"""
-    def __init__(self, parent=None, text="", description=""):
-        super().__init__(parent)
-        self.setWindowTitle("编辑内容和描述")
-        self.resize(800, 600)  # 增加窗口尺寸
-        
-        layout = QVBoxLayout(self)
-        
-        # 内容标签
-        content_label = QLabel("内容(&C):")  # 添加快捷键 Alt+C
-        content_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-        layout.addWidget(content_label)
-        
-        # 内容编辑框
-        self.content_edit = QTextEdit()
-        self.content_edit.setPlainText(text)
-        self.content_edit.setMinimumHeight(250)
-        content_label.setBuddy(self.content_edit)  # 将标签与编辑框关联
-        layout.addWidget(self.content_edit)
-        
-        # 描述标签
-        description_label = QLabel("描述(&D):")  # 添加快捷键 Alt+D
-        description_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-        layout.addWidget(description_label)
-        
-        # 描述编辑框
-        self.description_edit = QTextEdit()
-        self.description_edit.setPlainText(description)
-        self.description_edit.setMinimumHeight(150)
-        description_label.setBuddy(self.description_edit)  # 将标签与编辑框关联
-        layout.addWidget(self.description_edit)
-        
-        # 按钮布局
-        button_layout = QHBoxLayout()
-        
-        # 全屏切换按钮
-        self.fullscreen_button = QPushButton("全屏切换(&F)")  # 添加快捷键 Alt+F
-        self.fullscreen_button.clicked.connect(self.toggle_fullscreen)
-        button_layout.addWidget(self.fullscreen_button)
-        
-        # 清空内容按钮
-        self.clear_content_button = QPushButton("清空内容(&L)")  # 添加快捷键 Alt+L
-        self.clear_content_button.clicked.connect(self.clear_content)
-        button_layout.addWidget(self.clear_content_button)
-        
-        # 清空描述按钮
-        self.clear_desc_button = QPushButton("清空描述(&R)")  # 添加快捷键 Alt+R
-        self.clear_desc_button.clicked.connect(self.clear_description)
-        button_layout.addWidget(self.clear_desc_button)
-        
-        # 添加弹性空间
-        button_layout.addStretch()
-        
-        # 确定按钮
-        self.ok_button = QPushButton("确定(&O)")  # 添加快捷键 Alt+O
-        self.ok_button.clicked.connect(self.accept)
-        button_layout.addWidget(self.ok_button)
-        
-        # 取消按钮
-        self.cancel_button = QPushButton("取消(&X)")  # 添加快捷键 Alt+X
-        self.cancel_button.clicked.connect(self.reject)
-        button_layout.addWidget(self.cancel_button)
-        
-        layout.addLayout(button_layout)
-        
-        # 添加快捷键提示标签
-        shortcut_label = QLabel("快捷键: Alt+C=内容 Alt+D=描述 Alt+F=全屏 Alt+L=清空内容 Alt+R=清空描述 Alt+O=确定 Alt+X=取消")
-        shortcut_label.setStyleSheet("color: gray; font-style: italic; font-size: 12px;")
-        layout.addWidget(shortcut_label)
-        
-        # 设置窗口样式
-        self.setStyleSheet("""
-            QDialog {
-                background-color: #f5f5f5;
-            }
-            QTextEdit {
-                background-color: white;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-                padding: 8px;
-                font-size: 13px;
-                line-height: 1.5;
-            }
-            QPushButton {
-                background-color: #4a86e8;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #3a76d8;
-            }
-            QPushButton:pressed {
-                background-color: #2a66c8;
-            }
-            QPushButton#cancel_button {
-                background-color: #f0f0f0;
-                color: #333;
-                border: 1px solid #ddd;
-            }
-            QPushButton#cancel_button:hover {
-                background-color: #e0e0e0;
-            }
-        """)
-        
-        # 设置确定和取消按钮的对象名，用于样式表
-        self.ok_button.setObjectName("ok_button")
-        self.cancel_button.setObjectName("cancel_button")
-        
-        # 设置窗口标志，使其保持在最前面
-        self.setWindowFlags(
-            Qt.WindowType.Window |
-            Qt.WindowType.WindowStaysOnTopHint
-        )
-        
-        # 设置初始焦点到内容编辑框
-        self.content_edit.setFocus()
-    
-    def toggle_fullscreen(self):
-        """切换全屏模式"""
-        if self.isFullScreen():
-            self.showNormal()
-            self.fullscreen_button.setText("全屏切换(&F)")
-        else:
-            self.showFullScreen()
-            self.fullscreen_button.setText("退出全屏(&F)")
-    
-    def clear_content(self):
-        """清空内容编辑框"""
-        self.content_edit.clear()
-        self.content_edit.setFocus()
-    
-    def clear_description(self):
-        """清空描述编辑框"""
-        self.description_edit.clear()
-        self.description_edit.setFocus()
-    
-    def keyPressEvent(self, event):
-        """处理按键事件"""
-        # 处理 Ctrl+Enter 快捷键 (确定)
-        if event.key() == Qt.Key.Key_Return and event.modifiers() == Qt.KeyboardModifier.ControlModifier:
-            self.accept()
-        # 处理 Escape 键 (取消)
-        elif event.key() == Qt.Key.Key_Escape:
-            self.reject()
-        else:
-            super().keyPressEvent(event)
-    
-    def get_content(self):
-        """获取内容文本"""
-        return self.content_edit.toPlainText()
-    
-    def get_description(self):
-        """获取描述文本"""
-        return self.description_edit.toPlainText()
 
 
 class ClipboardHistoryApp(QMainWindow):
@@ -1278,8 +1233,8 @@ class ClipboardHistoryApp(QMainWindow):
         self.preview_window = PreviewWindow()
         
         # 为两个列表添加选择变化事件
-        self.history_list.currentItemChanged.connect(self.show_item_preview)
-        self.favorites_list.currentItemChanged.connect(self.show_item_preview)
+        self.history_list.currentItemChanged.connect(self.show_preview)
+        self.favorites_list.currentItemChanged.connect(self.show_preview)
 
     def check_clipboard(self):
         current_text = self.clipboard.text()
@@ -1652,6 +1607,59 @@ class ClipboardHistoryApp(QMainWindow):
             self.hide()
             QTimer.singleShot(100, lambda: keyboard.send('ctrl+v'))
 
+    def show_preview(self, current, previous):
+        """显示选中条目的完整内容"""
+        if not current:
+            self.preview_window.hide()
+            return
+        
+        current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
+        current_row = current_list.currentRow()
+        
+        try:
+            if self.stacked_widget.currentIndex() == 0:
+                # 历史记录面板
+                data_list = self.clipboard_history
+                original_text = data_list[current_row]
+                description = ""
+            else:
+                # 收藏夹面板
+                data_list = self.favorites[self.current_folder]
+                item = data_list[current_row]
+                # 处理新旧格式数据
+                if isinstance(item, str):
+                    original_text = item
+                    description = ""
+                else:
+                    original_text = item["text"]
+                    description = item.get("description", "")
+            
+            if 0 <= current_row < len(data_list):
+                # 移除条件判断，总是显示预览窗口
+                self.preview_window.set_content(original_text, description)
+                
+                # 计算预览窗口的位置
+                screen = QApplication.primaryScreen().geometry()
+                preview_width = self.preview_window.width()
+                
+                # 计算预览窗口的理想x坐标
+                ideal_x = self.x() + self.width() + 10
+                
+                # 如果预览窗口会超出屏幕右边界，则将其放在主窗口左侧
+                if ideal_x + preview_width > screen.right():
+                    preview_x = self.x() - preview_width - 10
+                else:
+                    preview_x = ideal_x
+                
+                preview_y = self.y()
+                
+                self.preview_window.move(preview_x, preview_y)
+                self.preview_window.show()
+        except Exception as e:
+            print(f"预览显示错误: {e}")
+            self.preview_window.hide()
+    
+
     def show_window(self):
         """显示窗口"""
         print("正在显示窗口")  # 调试信息
@@ -1865,53 +1873,6 @@ class ClipboardHistoryApp(QMainWindow):
             return text[:max_length] + "..."
         return text
 
-    def show_item_preview(self, current, previous):
-        """显示选中条目的预览"""
-        try:
-            if not current:
-                self.preview_window.hide()
-                return
-            
-            # 获取当前选中的内容
-            current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
-            current_row = current_list.currentRow()
-            
-            if current_row >= 0:
-                # 获取文本内容
-                if self.stacked_widget.currentIndex() == 0:
-                    # 从历史记录获取
-                    if current_row < len(self.clipboard_history):
-                        text = self.clipboard_history[current_row]
-                    else:
-                        print(f"索引超出范围: {current_row} >= {len(self.clipboard_history)}")
-                        return
-                else:
-                    # 从收藏夹获取
-                    if self.current_folder in self.favorites and current_row < len(self.favorites[self.current_folder]):
-                        item = self.favorites[self.current_folder][current_row]
-                        text = item["text"] if isinstance(item, dict) else str(item)
-                    else:
-                        print(f"收藏夹索引超出范围或文件夹不存在")
-                        return
-                
-                # 设置预览内容
-                self.preview_window.set_content(text)
-                
-                # 获取当前选中项的位置
-                item_rect = current_list.visualItemRect(current)
-                global_pos = current_list.mapToGlobal(item_rect.topRight())
-                
-                # 设置预览窗口位置
-                self.preview_window.move(global_pos.x() + 10, global_pos.y())
-                
-                # 显示预览窗口
-                self.preview_window.show()
-                self.preview_window.raise_()
-                
-        except Exception as e:
-            print(f"预览显示出错: {str(e)}")
-            import traceback
-            traceback.print_exc()
 
     def hide(self):
         """写hide方法，同时隐藏预览窗口"""
