@@ -12,6 +12,11 @@ import re
 import traceback
 from pynput.keyboard import Key, Controller
 
+import keyboard
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QApplication
+
+
 # 修改热键线程的实现
 class HotkeyThread(QThread):
     triggered = pyqtSignal()
@@ -1103,9 +1108,6 @@ class DescriptionDialog(QDialog):
         """获取描述文本"""
         return self.description_edit.toPlainText()
 
-import keyboard
-from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import QApplication
 
 class ClipboardHistoryApp(QMainWindow):
     def __init__(self):
