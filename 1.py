@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidget,
                            QVBoxLayout, QPushButton, QWidget, QSystemTrayIcon, QMenu,
                            QHBoxLayout, QStackedWidget, QLabel, QTextEdit, QDialog, QLineEdit, QMessageBox, QComboBox, QInputDialog, QFrame, QScrollArea, QCheckBox)
 from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QPoint
-from PyQt6.QtGui import QClipboard, QIcon, QKeyEvent
+from PyQt6.QtGui import QClipboard, QIcon, QKeyEvent, QKeySequence, QShortcut
 import sys
 import json
 import os
@@ -331,122 +331,38 @@ class DescriptionDialog(QDialog):
         return self.description_edit.toPlainText()
 
 class PreviewWindow(QWidget):
-    """悬浮预览窗口"""
     def __init__(self, parent=None):
-        super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint)
+        super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
+        self.setMinimumSize(500, 400)
         self.setStyleSheet("""
             QWidget {
-                background-color: #f0f0f0;
-                border: 1px solid #ccc;
-                border-radius: 5px;
+                background-color: #f8f8f8;
+                border: 1px solid #ddd;
+                border-radius: 4px;
             }
             QTextEdit {
-                border: none;
-                background-color: transparent;
+                background-color: white;
+                border: 1px solid #ddd;
+                border-radius: 4px;
                 padding: 5px;
             }
             QLabel {
-                color: #666;
-                padding: 5px;
-            }
-            QFrame#line {
-                background-color: #ccc;
-            }
-            QScrollBar:vertical {
-                border: none;
-                background: #f0f0f0;
-                width: 10px;
-                margin: 0px;
-            }
-            QScrollBar::handle:vertical {
-                background: #ccc;
-                border-radius: 5px;
-                min-height: 20px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-            QScrollBar:horizontal {
-                border: none;
-                background: #f0f0f0;
-                height: 10px;
-                margin: 0px;
-            }
-            QScrollBar::handle:horizontal {
-                background: #ccc;
-                border-radius: 5px;
-                min-width: 20px;
-            }
-            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
-                width: 0px;
+                font-weight: bold;
+                color: #333;
             }
         """)
         
+        # 创建布局
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(5)
         
-        # 创建一个滚动区域
-        scroll_area = QScrollArea(self)
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        
-        # 创建一个容器widget来放置所有内容
-        container = QWidget()
-        container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(0, 0, 0, 0)
-        container_layout.setSpacing(5)
-        
-        # 描述信息显示
-        self.description_label = QLabel("描述:")
-        container_layout.addWidget(self.description_label)
-        self.description_edit = QTextEdit()
-        self.description_edit.setReadOnly(True)
-        self.description_edit.setMaximumHeight(100)
-        self.description_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.description_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        container_layout.addWidget(self.description_edit)
-        
-        # 添加分界线
-        self.separator = QFrame()
-        self.separator.setObjectName("line")
-        self.separator.setFrameShape(QFrame.Shape.HLine)
-        self.separator.setFrameShadow(QFrame.Shadow.Sunken)
-        self.separator.setFixedHeight(2)
-        container_layout.addWidget(self.separator)
-        
-        # 内容标题和显示
-        self.content_label = QLabel("内容信息:")
-        container_layout.addWidget(self.content_label)
-        self.text_edit = QTextEdit()
-        self.text_edit.setReadOnly(True)
-        self.text_edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.text_edit.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        container_layout.addWidget(self.text_edit)
-        
-        # 设置弹性空间
-        container_layout.addStretch()
-        
-        # 将容器放入滚动区域
-        scroll_area.setWidget(container)
-        layout.addWidget(scroll_area)
-        
-        self.setMinimumSize(300, 200)
-        self.setMaximumSize(400, 600)  # 增加最大高度
+        # 创建内容显示区域
+        self.content = QTextEdit()
+        self.content.setReadOnly(True)
+        layout.addWidget(self.content)
     
     def set_content(self, text, description=""):
-        self.text_edit.setText(text)
-        if description:
-            self.description_label.show()
-            self.description_edit.show()
-            self.description_edit.setText(description)
-            self.separator.show()
-        else:
-            self.description_label.hide()
-            self.description_edit.hide()
-            self.separator.hide()
+        """设置预览内容"""
+        self.content.setText(text)
 
 class EditItemDialog(QDialog):
     """编辑条目对话框"""
@@ -625,6 +541,12 @@ class SearchDialog(QDialog):
         hint_label.setStyleSheet("color: gray; font-style: italic;")
         layout.addWidget(hint_label)
     
+        # 在创建搜索框之后，添加快捷键
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("输入搜索关键词")
+        shortcut = QShortcut(QKeySequence("Alt+D"), self)
+        shortcut.activated.connect(lambda: self.search_input.setFocus())
+    
     def show_scope_menu(self):
         """显示搜索范围下拉菜单"""
         # 创建菜单
@@ -681,27 +603,33 @@ class SearchDialog(QDialog):
     
     def show_preview(self, current, previous):
         """显示选中条目的预览"""
-        if not current:
-            self.preview_window.hide()
-            return
-        
-        index = self.results_list.currentRow()
-        if 0 <= index < len(self.results):
-            try:
-                # 修改这里：只解包三个值
+        try:
+            if not current:
+                self.preview_window.hide()
+                return
+            
+            index = self.results_list.currentRow()
+            if 0 <= index < len(self.results):
                 source, text, description = self.results[index]
                 
                 # 设置预览内容
-                if hasattr(self, 'preview_window'):
-                    self.preview_window.set_content(text, description)
-                    self.preview_window.show()
+                self.preview_window.set_content(text, description)
                 
-            except Exception as e:
-                print(f"显示预览时出错: {e}")
-                if hasattr(self, 'preview_window'):
-                    self.preview_window.hide()
-        else:
-            self.preview_window.hide()
+                # 获取当前选中项的位置
+                item_rect = self.results_list.visualItemRect(current)
+                global_pos = self.results_list.mapToGlobal(item_rect.topRight())
+                
+                # 设置预览窗口位置
+                self.preview_window.move(global_pos.x() + 10, global_pos.y())
+                
+                # 显示预览窗口
+                self.preview_window.show()
+                self.preview_window.raise_()
+                
+        except Exception as e:
+            print(f"显示预览时出错: {e}")
+            import traceback
+            traceback.print_exc()
     
     def show_results_context_menu(self, position):
         """显示搜索结果的右键菜单"""
@@ -875,11 +803,19 @@ class SearchDialog(QDialog):
         
         # 执行搜索
         try:
+            # 修正搜索范围的处理
+            if scope == "当前收藏夹":
+                # 如果是当前收藏夹，将范围修改为具体的收藏夹名称
+                scope = f"收藏夹-{self.parent_app.current_folder}"
+            
             self.results = self.parent_app.search_items(
                 search_text, use_regex, scope, case_sensitive, whole_word
             )
+            print(f"搜索到 {len(self.results)} 个结果")  # 调试输出
             self.fill_results()
         except Exception as e:
+            print(f"搜索错误: {str(e)}")  # 调试输出
+            traceback.print_exc()  # 打印完整错误堆栈
             QMessageBox.warning(self, "搜索错误", f"搜索时发生错误: {str(e)}")
     
     def fill_results(self):
@@ -887,8 +823,9 @@ class SearchDialog(QDialog):
         self.results_list.clear()
         
         for i, (source, text, description) in enumerate(self.results):
-            # 构建显示文本
-            display_text = f"{i+1}. [{source}] {text}"
+            # 构建显示文本 - 使用 truncate_text 来限制显示长度
+            truncated_text = self.parent_app.truncate_text(text)
+            display_text = f"{i+1}. [{source}] {truncated_text}"
             if description:
                 display_text += " [有描述]"
             
@@ -956,7 +893,7 @@ class SearchDialog(QDialog):
         """使用选中的搜索结果"""
         index = self.results_list.currentRow()
         if 0 <= index < len(self.results):
-            text = self.results[index][0]
+            source, text, description = self.results[index]  # 修改这里，使用正确的解包顺序
             QApplication.clipboard().setText(text)
             self.accept()  # 关闭对话框
     
@@ -1357,31 +1294,6 @@ class ClipboardHistoryApp(QMainWindow):
         # 为两个列表添加选择变化事件
         self.history_list.currentItemChanged.connect(self.show_item_preview)
         self.favorites_list.currentItemChanged.connect(self.show_item_preview)
-        
-        # 设置列表项为单行显示
-        self.history_list.setWordWrap(False)  # 禁用自动换行
-        self.favorites_list.setWordWrap(False)  # 禁用自动换行
-        
-        # 设置固定行高
-        self.history_list.setStyleSheet("QListWidget::item { height: 25px; }")
-        self.favorites_list.setStyleSheet("QListWidget::item { height: 25px; }")
-        
-        # 修改列表项的显示格式
-        self.history_list.setStyleSheet("""
-            QListWidget::item { 
-                height: 25px;
-                padding-left: 5px;
-            }
-        """)
-        self.favorites_list.setStyleSheet("""
-            QListWidget::item { 
-                height: 25px;
-                padding-left: 5px;
-            }
-        """)
-
-        # 添加删除历史记录
-        self.delete_history = []
 
     def check_clipboard(self):
         current_text = self.clipboard.text()
@@ -1545,7 +1457,7 @@ class ClipboardHistoryApp(QMainWindow):
 
     def closeEvent(self, event):
         """重写关闭事件，确保预览窗口也被关闭"""
-        self.preview_window.close()
+        self.preview_window.hide()
         super().closeEvent(event)
 
     def list_key_press(self, event: QKeyEvent):
@@ -1967,43 +1879,53 @@ class ClipboardHistoryApp(QMainWindow):
             return text[:max_length] + "..."
         return text
 
-    def show_item_preview(self, current, previous):  # 重命名这个方法
-        """显示主窗口中选中条目的预览"""
-        if not current:
-            self.preview_window.hide()
-            return
-        
+    def show_item_preview(self, current, previous):
+        """显示选中条目的预览"""
         try:
-            # 确定当前激活的列表
+            if not current:
+                self.preview_window.hide()
+                return
+            
+            # 获取当前选中的内容
             current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
             current_row = current_list.currentRow()
             
             if current_row >= 0:
+                # 获取文本内容
                 if self.stacked_widget.currentIndex() == 0:
-                    # 从历史记录获取内容
-                    text = self.clipboard_history[current_row]
-                    description = ""
-                else:
-                    # 从收藏夹获取内容
-                    item = self.favorites[self.current_folder][current_row]
-                    if isinstance(item, dict):
-                        text = item.get("text", "")
-                        description = item.get("description", "")
+                    # 从历史记录获取
+                    if current_row < len(self.clipboard_history):
+                        text = self.clipboard_history[current_row]
                     else:
-                        text = str(item)
-                        description = ""
+                        print(f"索引超出范围: {current_row} >= {len(self.clipboard_history)}")
+                        return
+                else:
+                    # 从收藏夹获取
+                    if self.current_folder in self.favorites and current_row < len(self.favorites[self.current_folder]):
+                        item = self.favorites[self.current_folder][current_row]
+                        text = item["text"] if isinstance(item, dict) else str(item)
+                    else:
+                        print(f"收藏夹索引超出范围或文件夹不存在")
+                        return
                 
                 # 设置预览内容
-                self.preview_window.set_content(text, description)
+                self.preview_window.set_content(text)
+                
+                # 获取当前选中项的位置
+                item_rect = current_list.visualItemRect(current)
+                global_pos = current_list.mapToGlobal(item_rect.topRight())
+                
+                # 设置预览窗口位置
+                self.preview_window.move(global_pos.x() + 10, global_pos.y())
                 
                 # 显示预览窗口
                 self.preview_window.show()
-            else:
-                self.preview_window.hide()
+                self.preview_window.raise_()
                 
         except Exception as e:
-            print(f"显示预览时出错: {e}")
-            self.preview_window.hide()
+            print(f"预览显示出错: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     def hide(self):
         """写hide方法，同时隐藏预览窗口"""
@@ -2319,54 +2241,47 @@ class ClipboardHistoryApp(QMainWindow):
     def search_items(self, search_text, use_regex, scope, case_sensitive=False, whole_word=False):
         """搜索项目"""
         results = []
+        print(f"开始搜索: 文本='{search_text}', 范围='{scope}'")  # 调试输出
         
         try:
-            # 根据搜索范围确定要搜索的内容
+            # 搜索历史记录
             if scope in ["全部", "历史记录"]:
-                # 搜索历史记录
+                print("搜索历史记录...")  # 调试输出
                 for i, item in enumerate(self.clipboard_history):
-                    # 确保我们使用原始文本内容
-                    text = item
-                    if isinstance(item, dict):
-                        text = item.get("text", "")
-                        description = item.get("description", "")
-                    else:
-                        text = str(item)  # 确保是字符串
-                        description = ""
+                    text = str(item)  # 确保是字符串
                     
-                    # 清理文本，移除可能的格式化标记
-                    clean_text = text
-                    if clean_text.startswith("[历史记录]"):
-                        clean_text = clean_text.replace("[历史记录]", "").strip()
-                    
-                    if self.match_text(clean_text, description, search_text, use_regex, case_sensitive, whole_word):
-                        # 存储干净的文本内容
-                        results.append(("历史记录", clean_text, description))
+                    if self.match_text(text, "", search_text, use_regex, case_sensitive, whole_word):
+                        results.append(("历史记录", text, ""))
             
-            # 搜索收藏夹的代码保持不变
+            # 搜索收藏夹
             if scope in ["全部", "所有收藏夹"] or scope.startswith("收藏夹-"):
-                folder_name = scope[4:] if scope.startswith("收藏夹-") else None
-                folders_to_search = [folder_name] if folder_name else self.favorites.keys()
+                print("搜索收藏夹...")  # 调试输出
+                if scope.startswith("收藏夹-"):
+                    # 搜索指定收藏夹
+                    folder_name = scope[4:]  # 去掉"收藏夹-"前缀
+                    folders = [folder_name] if folder_name in self.favorites else []
+                else:
+                    # 搜索所有收藏夹
+                    folders = list(self.favorites.keys())
                 
-                for folder in folders_to_search:
-                    if folder in self.favorites:
-                        for item in self.favorites[folder]:
-                            if isinstance(item, dict):
-                                text = item.get("text", "")
-                                description = item.get("description", "")
-                            else:
-                                text = str(item)
-                                description = ""
-                            
-                            if self.match_text(text, description, search_text, use_regex, case_sensitive, whole_word):
-                                results.append((f"收藏夹-{folder}", text, description))
+                for folder in folders:
+                    for item in self.favorites[folder]:
+                        if isinstance(item, dict):
+                            text = item.get("text", "")
+                            description = item.get("description", "")
+                        else:
+                            text = str(item)
+                            description = ""
+                        
+                        if self.match_text(text, description, search_text, use_regex, case_sensitive, whole_word):
+                            results.append((f"收藏夹-{folder}", text, description))
             
-            print(f"搜索结果数量: {len(results)}")
+            print(f"搜索完成，找到 {len(results)} 个结果")  # 调试输出
             return results
             
         except Exception as e:
-            import traceback
-            print(f"搜索错误详情: {traceback.format_exc()}")
+            print(f"搜索出错: {str(e)}")  # 调试输出
+            traceback.print_exc()
             raise e
     
     def match_text(self, text, description, pattern, use_regex, case_sensitive, whole_word):
@@ -2422,6 +2337,10 @@ class ClipboardHistoryApp(QMainWindow):
         
         # 显示通知
         self.tray_icon.showMessage("搜索热键已重置", "快捷键 ctrl+alt+a 已重新注册", QSystemTrayIcon.MessageIcon.Information, 3000)
+
+    def set_content(self, text, description=""):
+        """设置预览窗口内容"""
+        self.preview_window.set_content(text, description)
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径"""
