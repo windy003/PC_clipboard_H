@@ -989,6 +989,23 @@ class SearchDialog(QDialog):
                 
                 self.preview_window.set_content(text, description)
 
+                # 计算预览窗口的位置
+                screen = QApplication.primaryScreen().geometry()
+                preview_width = self.preview_window.width()
+                
+                # 计算预览窗口的理想x坐标
+                ideal_x = self.x() + self.width() + 10
+                
+                # 如果预览窗口会超出屏幕右边界，则将其放在主窗口左侧
+                if ideal_x + preview_width > screen.right():
+                    preview_x = self.x() - preview_width - 10
+                else:
+                    preview_x = ideal_x
+                
+                preview_y = self.y()
+                
+                self.preview_window.move(preview_x, preview_y)
+
                 self.preview_window.show()
 
 
