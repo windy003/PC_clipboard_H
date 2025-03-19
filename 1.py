@@ -683,59 +683,32 @@ class SearchDialog(QDialog):
         # 设置为当前选项
         self.scope_combo.setCurrentIndex(index)
         self.perform_search()
-    
+
+
     def show_preview(self, current, previous):
-        """显示选中条目的完整内容"""
+        """显示选中条目的预览"""
         if not current:
             self.preview_window.hide()
             return
         
-        current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
-        current_row = current_list.currentRow()
-        
-        try:
-            if self.stacked_widget.currentIndex() == 0:
-                # 历史记录面板
-                data_list = self.clipboard_history
-                original_text = data_list[current_row]
-                description = ""
-            else:
-                # 收藏夹面板
-                data_list = self.favorites[self.current_folder]
-                item = data_list[current_row]
-                # 处理新旧格式数据
-                if isinstance(item, str):
-                    original_text = item
-                    description = ""
-                else:
-                    original_text = item["text"]
-                    description = item.get("description", "")
-            
-            if 0 <= current_row < len(data_list):
-                # 移除条件判断，总是显示预览窗口
-                self.preview_window.set_content(original_text, description)
+        index = self.results_list.currentRow()
+        if 0 <= index < len(self.results):
+            try:
+                # 修改这里：只解包三个值
+                source, text, description = self.results[index]
                 
-                # 计算预览窗口的位置
-                screen = QApplication.primaryScreen().geometry()
-                preview_width = self.preview_window.width()
+                # 设置预览内容
+                if hasattr(self, 'preview_window'):
+                    self.preview_window.set_content(text, description)
+                    self.preview_window.show()
                 
-                # 计算预览窗口的理想x坐标
-                ideal_x = self.x() + self.width() + 10
-                
-                # 如果预览窗口会超出屏幕右边界，则将其放在主窗口左侧
-                if ideal_x + preview_width > screen.right():
-                    preview_x = self.x() - preview_width - 10
-                else:
-                    preview_x = ideal_x
-                
-                preview_y = self.y()
-                
-                self.preview_window.move(preview_x, preview_y)
-                self.preview_window.show()
-        except Exception as e:
-            print(f"预览显示错误: {e}")
+            except Exception as e:
+                print(f"显示预览时出错: {e}")
+                if hasattr(self, 'preview_window'):
+                    self.preview_window.hide()
+        else:
             self.preview_window.hide()
-
+    
 
     def show_results_context_menu(self, position):
         """显示搜索结果的右键菜单"""
