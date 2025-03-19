@@ -626,7 +626,8 @@ class SearchDialog(QDialog):
                 action.triggered.connect(lambda checked, name=folder_name: self.set_folder_scope(name))
         
         # 在按钮下方显示菜单
-        menu.exec(self.scope_button.mapToGlobal(QPoint(0, self.scope_button.height())))
+        button_pos = self.scope_button.mapToGlobal(QPoint(0, self.scope_button.height()))
+        menu.exec(button_pos)
     
     def set_search_scope(self, scope, index):
         """设置搜索范围"""
@@ -635,8 +636,8 @@ class SearchDialog(QDialog):
 
     def set_folder_scope(self, folder_name):
         """设置特定收藏夹作为搜索范围"""
-        # 检查是否已存在该选项
-        folder_scope = f"收藏夹: {folder_name}"
+        # 修改搜索范围的格式，使其与 search_items 方法中的判断一致
+        folder_scope = f"收藏夹-{folder_name}"  # 修改这里，使用连字符而不是冒号
         index = self.scope_combo.findText(folder_scope)
         
         if index == -1:
