@@ -740,7 +740,8 @@ class SearchDialog(QDialog):
             QMessageBox.information(self, "添加成功", "已添加到当前收藏夹")
         else:
             QMessageBox.information(self, "提示", "该内容已存在于当前收藏夹")
-    
+
+            
     def keyPressEvent(self, event):
         """处理按键事件"""
         if event.key() == Qt.Key.Key_Escape:
@@ -754,6 +755,10 @@ class SearchDialog(QDialog):
             # 如果按下 Ctrl+C，并且有选中的项目，则执行复制操作
             if self.results_list.currentRow() >= 0:
                 self.copy_selected()
+        elif event.key() == Qt.Key.Key_D and event.modifiers() == Qt.KeyboardModifier.AltModifier:
+            # 如果按下 Alt+D，聚焦到搜索框
+            self.search_input.setFocus()
+            self.search_input.selectAll()  # 选中所有文本以便直接输入
         else:
             super().keyPressEvent(event)
     
