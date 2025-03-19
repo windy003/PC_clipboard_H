@@ -541,12 +541,6 @@ class SearchDialog(QDialog):
         hint_label.setStyleSheet("color: gray; font-style: italic;")
         layout.addWidget(hint_label)
     
-        # 在创建搜索框之后，添加快捷键
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("输入搜索关键词")
-        shortcut = QShortcut(QKeySequence("Alt+D"), self)
-        shortcut.activated.connect(lambda: self.search_input.setFocus())
-    
     def show_scope_menu(self):
         """显示搜索范围下拉菜单"""
         # 创建菜单
@@ -603,33 +597,27 @@ class SearchDialog(QDialog):
     
     def show_preview(self, current, previous):
         """显示选中条目的预览"""
-        try:
-            if not current:
-                self.preview_window.hide()
-                return
-            
-            index = self.results_list.currentRow()
-            if 0 <= index < len(self.results):
+        if not current:
+            self.preview_window.hide()
+            return
+        
+        index = self.results_list.currentRow()
+        if 0 <= index < len(self.results):
+            try:
+                # 修改这里：只解包三个值
                 source, text, description = self.results[index]
                 
                 # 设置预览内容
-                self.preview_window.set_content(text, description)
+                if hasattr(self, 'preview_window'):
+                    self.preview_window.set_content(text, description)
+                    self.preview_window.show()
                 
-                # 获取当前选中项的位置
-                item_rect = self.results_list.visualItemRect(current)
-                global_pos = self.results_list.mapToGlobal(item_rect.topRight())
-                
-                # 设置预览窗口位置
-                self.preview_window.move(global_pos.x() + 10, global_pos.y())
-                
-                # 显示预览窗口
-                self.preview_window.show()
-                self.preview_window.raise_()
-                
-        except Exception as e:
-            print(f"显示预览时出错: {e}")
-            import traceback
-            traceback.print_exc()
+            except Exception as e:
+                print(f"显示预览时出错: {e}")
+                if hasattr(self, 'preview_window'):
+                    self.preview_window.hide()
+        else:
+            self.preview_window.hide()
     
     def show_results_context_menu(self, position):
         """显示搜索结果的右键菜单"""
@@ -803,19 +791,11 @@ class SearchDialog(QDialog):
         
         # 执行搜索
         try:
-            # 修正搜索范围的处理
-            if scope == "当前收藏夹":
-                # 如果是当前收藏夹，将范围修改为具体的收藏夹名称
-                scope = f"收藏夹-{self.parent_app.current_folder}"
-            
             self.results = self.parent_app.search_items(
                 search_text, use_regex, scope, case_sensitive, whole_word
             )
-            print(f"搜索到 {len(self.results)} 个结果")  # 调试输出
             self.fill_results()
         except Exception as e:
-            print(f"搜索错误: {str(e)}")  # 调试输出
-            traceback.print_exc()  # 打印完整错误堆栈
             QMessageBox.warning(self, "搜索错误", f"搜索时发生错误: {str(e)}")
     
     def fill_results(self):
@@ -823,9 +803,8 @@ class SearchDialog(QDialog):
         self.results_list.clear()
         
         for i, (source, text, description) in enumerate(self.results):
-            # 构建显示文本 - 使用 truncate_text 来限制显示长度
-            truncated_text = self.parent_app.truncate_text(text)
-            display_text = f"{i+1}. [{source}] {truncated_text}"
+            # 构建显示文本
+            display_text = f"{i+1}. [{source}] {text}"
             if description:
                 display_text += " [有描述]"
             
@@ -893,7 +872,7 @@ class SearchDialog(QDialog):
         """使用选中的搜索结果"""
         index = self.results_list.currentRow()
         if 0 <= index < len(self.results):
-            source, text, description = self.results[index]  # 修改这里，使用正确的解包顺序
+            text = self.results[index][0]
             QApplication.clipboard().setText(text)
             self.accept()  # 关闭对话框
     
