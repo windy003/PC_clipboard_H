@@ -575,46 +575,10 @@ class SearchDialog(QDialog):
         # 存储搜索结果
         self.results = []  # 确保初始化 results 列表
         
-        # 创建悬浮预览窗口
-        self.preview_window = QWidget(None, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
-        self.preview_window.setMinimumSize(500, 400)  # 设置更大的预览窗口尺寸
-        self.preview_window.setStyleSheet("""
-            QWidget {
-                background-color: #f8f8f8;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-            }
-            QTextEdit {
-                background-color: white;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-                padding: 5px;
-            }
-            QLabel {
-                font-weight: bold;
-                color: #333;
-            }
-        """)
-        
-        # 预览窗口布局
-        preview_layout = QVBoxLayout(self.preview_window)
-        
-        # 描述标签和内容
-        self.preview_desc_label = QLabel("描述:")
-        preview_layout.addWidget(self.preview_desc_label)
-        
-        self.preview_desc = QTextEdit()
-        self.preview_desc.setReadOnly(True)
-        self.preview_desc.setMinimumHeight(100)
-        preview_layout.addWidget(self.preview_desc)
-        
-        # 内容标签和显示
-        self.preview_content_label = QLabel("内容:")
-        preview_layout.addWidget(self.preview_content_label)
-        
-        self.preview_content = QTextEdit()
-        self.preview_content.setReadOnly(True)
-        preview_layout.addWidget(self.preview_content)
+
+
+        self.preview_window = PreviewWindow()
+
         
         # 设置焦点到搜索框
         self.search_input.setFocus()
@@ -684,31 +648,6 @@ class SearchDialog(QDialog):
         self.scope_combo.setCurrentIndex(index)
         self.perform_search()
 
-
-    def show_preview(self, current, previous):
-        """显示选中条目的预览"""
-        if not current:
-            self.preview_window.hide()
-            return
-        
-        index = self.results_list.currentRow()
-        if 0 <= index < len(self.results):
-            try:
-                # 修改这里：只解包三个值
-                source, text, description = self.results[index]
-                
-                # 设置预览内容
-                if hasattr(self, 'preview_window'):
-                    self.preview_window.set_content(text, description)
-                    self.preview_window.show()
-                
-            except Exception as e:
-                print(f"显示预览时出错: {e}")
-                if hasattr(self, 'preview_window'):
-                    self.preview_window.hide()
-        else:
-            self.preview_window.hide()
-    
 
     def show_results_context_menu(self, position):
         """显示搜索结果的右键菜单"""
@@ -1036,6 +975,32 @@ class SearchDialog(QDialog):
             print(f"执行粘贴操作时出错: {e}")
 
 
+    def show_preview(self, current, previous):
+        """显示选中条目的预览"""
+        if not current:
+            self.preview_window.hide()
+            return
+        
+        index = self.results_list.currentRow()
+        if 0 <= index < len(self.results):
+            try:
+                # 修改这里：只解包三个值
+                source, text, description = self.results[index]
+                
+                self.preview_window.set_content(text, description)
+
+                self.preview_window.show()
+
+
+                
+            except Exception as e:
+                print(f"显示预览时出错: {e}")
+                if hasattr(self, 'preview_window'):
+                    self.preview_window.hide()
+        else:
+            self.preview_window.hide()
+    
+
 
 class ClipboardHistoryApp(QMainWindow):
     def __init__(self):
@@ -1208,6 +1173,61 @@ class ClipboardHistoryApp(QMainWindow):
         # 为两个列表添加选择变化事件
         self.history_list.currentItemChanged.connect(self.show_preview)
         self.favorites_list.currentItemChanged.connect(self.show_preview)
+
+
+    def show_preview(self, current, previous):
+        """显示选中条目的完整内容"""
+        if not current:
+            self.preview_window.hide()
+            return
+        
+        current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
+        current_row = current_list.currentRow()
+        
+        try:
+            if self.stacked_widget.currentIndex() == 0:
+                # 历史记录面板
+                data_list = self.clipboard_history
+                original_text = data_list[current_row]
+                description = ""
+            else:
+                # 收藏夹面板
+                data_list = self.favorites[self.current_folder]
+                item = data_list[current_row]
+                # 处理新旧格式数据
+                if isinstance(item, str):
+                    original_text = item
+                    description = ""
+                else:
+                    original_text = item["text"]
+                    description = item.get("description", "")
+            
+            if 0 <= current_row < len(data_list):
+                # 移除条件判断，总是显示预览窗口
+                self.preview_window.set_content(original_text, description)
+                
+                # 计算预览窗口的位置
+                screen = QApplication.primaryScreen().geometry()
+                preview_width = self.preview_window.width()
+                
+                # 计算预览窗口的理想x坐标
+                ideal_x = self.x() + self.width() + 10
+                
+                # 如果预览窗口会超出屏幕右边界，则将其放在主窗口左侧
+                if ideal_x + preview_width > screen.right():
+                    preview_x = self.x() - preview_width - 10
+                else:
+                    preview_x = ideal_x
+                
+                preview_y = self.y()
+                
+                self.preview_window.move(preview_x, preview_y)
+                self.preview_window.show()
+        except Exception as e:
+            print(f"预览显示错误: {e}")
+            self.preview_window.hide()
+    
+
 
     def check_clipboard(self):
         current_text = self.clipboard.text()
@@ -1579,59 +1599,6 @@ class ClipboardHistoryApp(QMainWindow):
             self.clipboard.setText(original_text)
             self.hide()
             QTimer.singleShot(100, lambda: keyboard.send('ctrl+v'))
-
-    def show_preview(self, current, previous):
-        """显示选中条目的完整内容"""
-        if not current:
-            self.preview_window.hide()
-            return
-        
-        current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
-        current_row = current_list.currentRow()
-        
-        try:
-            if self.stacked_widget.currentIndex() == 0:
-                # 历史记录面板
-                data_list = self.clipboard_history
-                original_text = data_list[current_row]
-                description = ""
-            else:
-                # 收藏夹面板
-                data_list = self.favorites[self.current_folder]
-                item = data_list[current_row]
-                # 处理新旧格式数据
-                if isinstance(item, str):
-                    original_text = item
-                    description = ""
-                else:
-                    original_text = item["text"]
-                    description = item.get("description", "")
-            
-            if 0 <= current_row < len(data_list):
-                # 移除条件判断，总是显示预览窗口
-                self.preview_window.set_content(original_text, description)
-                
-                # 计算预览窗口的位置
-                screen = QApplication.primaryScreen().geometry()
-                preview_width = self.preview_window.width()
-                
-                # 计算预览窗口的理想x坐标
-                ideal_x = self.x() + self.width() + 10
-                
-                # 如果预览窗口会超出屏幕右边界，则将其放在主窗口左侧
-                if ideal_x + preview_width > screen.right():
-                    preview_x = self.x() - preview_width - 10
-                else:
-                    preview_x = ideal_x
-                
-                preview_y = self.y()
-                
-                self.preview_window.move(preview_x, preview_y)
-                self.preview_window.show()
-        except Exception as e:
-            print(f"预览显示错误: {e}")
-            self.preview_window.hide()
-    
 
     def show_window(self):
         """显示窗口"""
