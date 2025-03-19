@@ -657,7 +657,8 @@ class SearchDialog(QDialog):
         if current_item:
             index = self.results_list.currentRow()
             if 0 <= index < len(self.results):
-                text, source, original_index, description = self.results[index]
+                # 使用元组解包，并为可能缺失的值提供默认值
+                text, source, original_index, description = (*self.results[index], "", "", "", "")[:4]
                 
                 # 添加编辑选项
                 edit_action = menu.addAction("编辑内容和描述(&E)")  # Alt+E
