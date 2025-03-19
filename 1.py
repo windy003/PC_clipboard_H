@@ -669,7 +669,14 @@ class SearchDialog(QDialog):
                 if source == "历史记录":
                     add_to_favorites = menu.addAction("添加到收藏(&A)")  # Alt+A
                 
-                action = menu.exec(self.results_list.mapToGlobal(position))
+                # 获取当前条目的矩形区域
+                item_rect = self.results_list.visualItemRect(current_item)
+                # 将条目的位置转换为全局坐标，并稍微向下偏移
+                global_pos = self.results_list.mapToGlobal(item_rect.bottomLeft())
+                # 调整菜单显示位置，使其紧贴条目下方
+                global_pos.setY(global_pos.y() + 5)
+                
+                action = menu.exec(global_pos)
                 
                 if action == edit_action:
                     self.edit_selected_item()
