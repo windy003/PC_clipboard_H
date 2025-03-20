@@ -1413,7 +1413,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/3/20-01")
+        version_action = tray_menu.addAction("版本: 2025/3/20-02")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
@@ -2253,20 +2253,33 @@ class ClipboardHistoryApp(QMainWindow):
     
     def match_text(self, text, description, pattern, use_regex, case_sensitive, whole_word):
         """匹配文本"""
-        if use_regex:
-            try:
-                # 正则表达式搜索
-                flags = 0 if case_sensitive else re.IGNORECASE
-                if whole_word:
-                    # 全字匹配的正则表达式
-                    pattern = r'\b' + pattern + r'\b'
-                return bool(re.search(pattern, text, flags))
-            except re.error:
-                # 正则表达式错误，使用普通搜索
-                return self.normal_search(text, pattern, case_sensitive, whole_word)
-        else:
-            # 普通搜索
-            return self.normal_search(text, pattern, case_sensitive, whole_word)
+        def search_in_text(search_text):
+            if use_regex:
+                try:
+                    # 正则表达式搜索
+                    flags = 0 if case_sensitive else re.IGNORECASE
+                    if whole_word:
+                        # 全字匹配的正则表达式
+                        search_pattern = r'\b' + pattern + r'\b'
+                    else:
+                        search_pattern = pattern
+                    return bool(re.search(search_pattern, search_text, flags))
+                except re.error:
+                    # 正则表达式错误，使用普通搜索
+                    return self.normal_search(search_text, pattern, case_sensitive, whole_word)
+            else:
+                # 普通搜索
+                return self.normal_search(search_text, pattern, case_sensitive, whole_word)
+        
+        # 首先在文本内容中搜索
+        if search_in_text(text):
+            return True
+            
+        # 如果文本中没找到且有描述内容，则在描述中搜索
+        if description and search_in_text(description):
+            return True
+            
+        return False
     
     def normal_search(self, text, pattern, is_case_sensitive, is_whole_word):
         """执行普通文本搜索"""
