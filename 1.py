@@ -692,7 +692,7 @@ class SearchDialog(QDialog):
         """编辑选中的搜索结果项"""
         index = self.results_list.currentRow()
         if 0 <= index < len(self.results):
-            # 修改这里：只解包三个值
+            # 解包三个值
             source, text, description = self.results[index]
             
             # 创建编辑对话框
@@ -718,45 +718,44 @@ class SearchDialog(QDialog):
                     truncated_text = self.parent_app.truncate_text(new_content)
                     self.parent_app.history_list.item(index).setText(f"{index+1}. {truncated_text}")
                     
-                    # 更新搜索结果 - 历史记录项不保存描述信息
-                    self.results[index] = (new_content, source, index, "")
+                    # 更新搜索结果
+                    self.results[index] = (source, new_content, "")
                     
                 elif source.startswith("收藏夹-"):
-                    # 更新收藏夹 - 修正这里的处理方式
-                    folder_name = source[4:]  # 修改这里，完整提取"收藏夹-"后面的内容
-                    print(f"完整收藏夹名称: {folder_name}")
-                    print(f"收藏夹是否存在: {folder_name in self.parent_app.favorites}")
+                    folder_name = source[4:]  # 提取收藏夹名称
                     
                     if folder_name in self.parent_app.favorites:
-                        print(f"收藏夹 {folder_name} 中的项目数: {len(self.parent_app.favorites[folder_name])}")
-                        print(f"要更新的索引: {index}")
+                        # 检查是否已存在相同内容的项目
+                        existing_items = self.parent_app.favorites[folder_name]
+                        found_index = None
                         
-                        # 检查索引是否有效
-                        if index < len(self.parent_app.favorites[folder_name]):
-                            # 确保使用字典格式保存
+                        # 查找原始项目的索引
+                        for i, item in enumerate(existing_items):
+                            if isinstance(item, dict) and item["text"] == text:
+                                found_index = i
+                                break
+                        
+                        if found_index is not None:
+                            # 更新现有项目
                             new_item = {
                                 "text": new_content,
                                 "description": new_description
                             }
-                            
-                            # 更新收藏夹中的内容
-                            self.parent_app.favorites[folder_name][index] = new_item
-                            
-                            # 立即保存更改到文件
-                            self.parent_app.save_favorites()
+                            self.parent_app.favorites[folder_name][found_index] = new_item
                             
                             # 如果当前显示的是该收藏夹，更新显示
                             if self.parent_app.current_folder == folder_name:
                                 truncated_text = self.parent_app.truncate_text(new_content)
-                                self.parent_app.favorites_list.item(index).setText(f"{index+1}. {truncated_text}")
+                                self.parent_app.favorites_list.item(found_index).setText(f"{found_index+1}. {truncated_text}")
                             
-                            # 更新搜索结果 - 包含描述信息
-                            self.results[index] = (new_content, source, index, new_description)
-                        else:
-                            print(f"错误: 索引 {index} 超出范围 (0-{len(self.parent_app.favorites[folder_name])-1})")
-                    else:
-                        print(f"错误: 找不到收藏夹 '{folder_name}'")
-                        print(f"可用的收藏夹: {list(self.parent_app.favorites.keys())}")
+                            # 更新搜索结果
+                            self.results[index] = (source, new_content, new_description)
+                            
+                            # 立即保存更改
+                            self.parent_app.save_favorites()
+                            
+                            # 更新搜索结果显示
+                            self.fill_results()
     
     def add_to_favorites(self, text):
         """添加文本到当前收藏夹"""
@@ -1430,7 +1429,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/3/20-03")
+        version_action = tray_menu.addAction("版本: 2025/3/20-04")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
@@ -1440,6 +1439,9 @@ class ClipboardHistoryApp(QMainWindow):
         search_action = tray_menu.addAction("搜索(&S)")
         search_action.triggered.connect(self.show_search_dialog)
         
+        self.delete_history = []
+
+
         # 添加分隔线
         tray_menu.addSeparator()
         
