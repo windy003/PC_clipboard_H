@@ -1056,6 +1056,12 @@ class ClipboardHistoryApp(QMainWindow):
         hint_label.setStyleSheet("color: gray;")  # 使提示文字颜色变淡
         top_layout.addWidget(hint_label)
         
+        # 添加搜索按钮
+        self.search_button = QPushButton("搜索(&S)")  # 添加快捷键 Alt+S
+        self.search_button.setFixedWidth(60)
+        self.search_button.clicked.connect(self.show_panel_search)
+        top_layout.addWidget(self.search_button)
+        
         top_layout.addStretch()  # 添加弹性空间，使标签靠左对齐
         
         # 创建堆叠式窗口部件
@@ -2205,17 +2211,27 @@ class ClipboardHistoryApp(QMainWindow):
                         results.append(("历史记录", text, ""))
             
             # 搜索收藏夹
-            if scope in ["全部", "所有收藏夹"] or scope.startswith("收藏夹-"):
+            if scope in ["全部", "所有收藏夹", "当前收藏夹"] or scope.startswith("收藏夹-"):
                 print("搜索收藏夹...")  # 调试输出
-                if scope.startswith("收藏夹-"):
-                    # 搜索指定收藏夹
+                
+                # 确定要搜索的收藏夹
+                if scope == "当前收藏夹":
+                    folders = [self.current_folder]
+                elif scope.startswith("收藏夹-"):
                     folder_name = scope[4:]  # 去掉"收藏夹-"前缀
                     folders = [folder_name] if folder_name in self.favorites else []
                 else:
-                    # 搜索所有收藏夹
+                    # "全部"或"所有收藏夹"
                     folders = list(self.favorites.keys())
                 
+                print(f"要搜索的收藏夹: {folders}")  # 调试输出
+                
                 for folder in folders:
+                    if folder not in self.favorites:
+                        print(f"收藏夹 {folder} 不存在")
+                        continue
+                        
+                    print(f"搜索收藏夹 {folder} 中的 {len(self.favorites[folder])} 个项目")
                     for item in self.favorites[folder]:
                         if isinstance(item, dict):
                             text = item.get("text", "")
@@ -2292,6 +2308,20 @@ class ClipboardHistoryApp(QMainWindow):
     def set_content(self, text, description=""):
         """设置预览窗口内容"""
         self.preview_window.set_content(text, description)
+
+    def show_panel_search(self):
+        """显示当前面板的搜索对话框"""
+        dialog = SearchDialog(self)
+        # 根据当前面板设置搜索范围
+        if self.stacked_widget.currentIndex() == 0:
+            # 历史记录面板
+            dialog.scope_combo.setCurrentText("历史记录")
+        else:
+            # 收藏面板
+            dialog.scope_combo.setCurrentText("当前收藏夹")
+        dialog.perform_search()  # 立即执行一次搜索
+        dialog.search_input.setFocus()  # 设置焦点到搜索框
+        dialog.exec()
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径"""
