@@ -1429,7 +1429,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/3/20-04")
+        version_action = tray_menu.addAction("版本: 2025/3/23-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
