@@ -2285,7 +2285,12 @@ class ClipboardHistoryApp(QMainWindow):
                 return self.normal_search(text, pattern, case_sensitive, whole_word)
         else:
             # 普通搜索
-            return self.normal_search(text, pattern, case_sensitive, whole_word)
+            if self.normal_search(text, pattern, case_sensitive, whole_word):
+                return True
+            elif self.normal_search(description, pattern, case_sensitive, whole_word):
+                return True
+            else:
+                return False
     
     def normal_search(self, text, pattern, is_case_sensitive, is_whole_word):
         """执行普通文本搜索"""
