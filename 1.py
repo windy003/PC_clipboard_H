@@ -665,6 +665,7 @@ class SearchDialog(QDialog):
                 edit_action = menu.addAction("编辑内容和描述(&E)")  # Alt+E
                 use_action = menu.addAction("使用选中项(&U)")  # Alt+U
                 copy_action = menu.addAction("复制到剪贴板(&C)")  # Alt+C
+                delete_action = menu.addAction("删除(&D)")  # Alt+D
                 
                 # 如果是历史记录，添加"添加到收藏"选项
                 if source == "历史记录":
@@ -685,9 +686,72 @@ class SearchDialog(QDialog):
                     self.use_selected()
                 elif action == copy_action:
                     self.copy_selected()
+                elif action == delete_action:
+                    self.delete_selected_item()
                 elif source == "历史记录" and action == add_to_favorites:
                     self.add_to_favorites(text)
     
+
+    def delete_selected_item(self):
+        """删除选中的搜索结果项，并从原始数据源中删除"""
+        index = self.results_list.currentRow()
+        if 0 <= index < len(self.results):
+            source, text, description = self.results[index]
+            
+            # 截断显示的文本
+            truncated_text = text[:50] + ('...' if len(text) > 50 else '')
+            
+            # 确认删除 - 使用正确的按钮类型
+            reply = QMessageBox.question(
+                self, "确认删除", 
+                f"确定要从{source}中删除此项？\n{truncated_text}",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                # 从搜索结果中删除
+                self.results.pop(index)
+                self.fill_results()
+                
+                # 从数据源中删除
+                parent = self.parent()
+                if source.startswith("收藏夹-"):
+                    # 提取收藏夹名称
+                    folder_name = source[4:]  # 去掉"收藏夹-"前缀
+                    
+                    # 检查收藏夹是否存在
+                    if folder_name in parent.favorites:
+                        # 遍历收藏夹中的项目
+                        for i, item in enumerate(parent.favorites[folder_name]):
+                            if isinstance(item, dict) and item["text"] == text:
+                                # 从收藏夹数据中删除
+                                parent.favorites[folder_name].pop(i)
+                                parent.save_favorites()
+                                
+                                # 如果当前显示的是该收藏夹，更新 UI
+                                if parent.current_folder == folder_name:
+                                    parent.favorites_list.takeItem(i)
+                                    parent.update_list_numbers(parent.favorites_list)
+                                break
+                elif source == "历史记录":
+                    # 在历史记录中查找并删除
+                    for i, history_text in enumerate(parent.clipboard_history):
+                        if history_text == text:
+                            # 从历史记录中删除
+                            deleted_item = parent.clipboard_history.pop(i)
+                            parent.delete_history.append(deleted_item)
+                            parent.update_history_list()
+                            parent.save_history()
+                            break
+                
+                # 显示状态信息
+                if hasattr(parent, 'statusBar'):
+                    parent.statusBar().showMessage(f"已从{source}中删除项目", 3000)
+                else:
+                    # 如果没有状态栏，可以在控制台打印信息
+                    print(f"已从{source}中删除项目")
+
     def edit_selected_item(self):
         """编辑选中的搜索结果项"""
         index = self.results_list.currentRow()
@@ -1429,7 +1493,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/3/23-01")
+        version_action = tray_menu.addAction("版本: 2025/3/27-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
