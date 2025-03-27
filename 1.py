@@ -659,16 +659,17 @@ class SearchDialog(QDialog):
             index = self.results_list.currentRow()
             if 0 <= index < len(self.results):
                 # 使用元组解包，并为可能缺失的值提供默认值
-                text, source, original_index, description = (*self.results[index], "", "", "", "")[:4]
-                
+                source, text, description = (*self.results[index], "", "", "")[:3]
+
                 # 添加编辑选项
                 edit_action = menu.addAction("编辑内容和描述(&E)")  # Alt+E
-                copy_action = menu.addAction("复制到剪贴板(&C)")  # Alt+C
                 delete_action = menu.addAction("删除(&D)")  # Alt+D
                 
-                # 如果是历史记录，添加"添加到收藏"选项
-                if source == "历史记录":
-                    add_to_favorites = menu.addAction("添加到收藏(&A)")  # Alt+A
+                # 添加"移动到收藏夹"选项
+                move_to_favorites_menu = menu.addMenu("移动到收藏夹(&M)")  # Alt+M
+                for folder in self.parent_app.favorites.keys():
+                    move_action = move_to_favorites_menu.addAction(folder)
+                    move_action.triggered.connect(lambda checked, f=folder: self.move_to_folder_from_results(index, f))
                 
                 # 获取当前条目的矩形区域
                 item_rect = self.results_list.visualItemRect(current_item)
@@ -681,14 +682,47 @@ class SearchDialog(QDialog):
                 
                 if action == edit_action:
                     self.edit_selected_item()
-                elif action == use_action:
-                    self.use_selected()
-                elif action == copy_action:
-                    self.copy_selected()
                 elif action == delete_action:
                     self.delete_selected_item()
-                elif source == "历史记录" and action == add_to_favorites:
-                    self.add_to_favorites(text)
+
+    def move_to_folder_from_results(self, index, target_folder):
+        """将搜索结果中的条目移动到指定收藏夹"""
+        if 0 <= index < len(self.results):
+            source, text, description = self.results[index]
+            
+            # 确保目标收藏夹存在
+            if target_folder not in self.parent_app.favorites:
+                self.parent_app.favorites[target_folder] = []
+            
+            # 创建新的收藏项
+            new_item = {"text": text, "description": description}
+            
+            # 添加到目标收藏夹
+            self.parent_app.favorites[target_folder].append(new_item)
+            
+            # 如果源是收藏夹，从原收藏夹中移除
+            if source.startswith("收藏夹-"):
+                original_folder = source[4:]  # 去掉"收藏夹-"前缀
+                if original_folder in self.parent_app.favorites:
+                    for i, item in enumerate(self.parent_app.favorites[original_folder]):
+                        if isinstance(item, dict) and item["text"] == text:
+                            self.parent_app.favorites[original_folder].pop(i)
+                            break
+            # 如果源是历史记录，从历史记录中移除
+            elif source == "历史记录":
+                if text in self.parent_app.clipboard_history:
+                    self.parent_app.clipboard_history.remove(text)
+                    self.parent_app.save_history()
+            
+            # 保存更改
+            self.parent_app.save_favorites()
+            
+            # 更新显示
+            if self.parent_app.current_folder == target_folder:
+                truncated_text = self.parent_app.truncate_text(text)
+                self.parent_app.favorites_list.addItem(f"{len(self.parent_app.favorites[target_folder])}. {truncated_text}")
+            
+            QMessageBox.information(self, "移动成功", f"已移动到收藏夹: {target_folder}")
     
 
     def delete_selected_item(self):
@@ -820,27 +854,6 @@ class SearchDialog(QDialog):
                             # 更新搜索结果显示
                             self.fill_results()
     
-    def add_to_favorites(self, text):
-        """添加文本到当前收藏夹"""
-        # 创建新的收藏项
-        new_item = {
-            "text": text,
-            "description": ""
-        }
-        
-        # 检查是否已存在
-        existing_texts = [item["text"] if isinstance(item, dict) else item 
-                          for item in self.parent_app.favorites[self.parent_app.current_folder]]
-        
-        if text not in existing_texts:
-            self.parent_app.favorites[self.parent_app.current_folder].insert(0, new_item)
-            truncated_text = self.parent_app.truncate_text(text)
-            self.parent_app.favorites_list.insertItem(0, truncated_text)
-            self.parent_app.update_list_numbers(self.parent_app.favorites_list)
-            self.parent_app.save_favorites()
-            QMessageBox.information(self, "添加成功", "已添加到当前收藏夹")
-        else:
-            QMessageBox.information(self, "提示", "该内容已存在于当前收藏夹")
 
             
     def keyPressEvent(self, event):
@@ -1834,7 +1847,7 @@ class ClipboardHistoryApp(QMainWindow):
             edit_action = menu.addAction("编辑(&E)")  # Alt+E
             delete_action = menu.addAction("删除(&D)")  # Alt+D
             
-            move_menu = menu.addMenu("移动到收藏夹(&V)")  # Alt+V
+            move_menu = menu.addMenu("移动到收藏夹(&M)")  # Alt+V
             for folder in self.favorites.keys():
                 move_menu.addAction(folder)
 
@@ -2033,7 +2046,7 @@ class ClipboardHistoryApp(QMainWindow):
             edit_action = menu.addAction("编辑内容和描述(&E)")  # Alt+E
             new_folder = menu.addAction("新建收藏夹(&N)...")  # Alt+N
             
-            move_menu = menu.addMenu("移动到收藏夹(&V)")  # Alt+V
+            move_menu = menu.addMenu("移动到收藏夹(&M)")  # Alt+V
             for folder in self.favorites.keys():
                 if folder != self.current_folder:
                     move_menu.addAction(folder)
