@@ -663,7 +663,6 @@ class SearchDialog(QDialog):
                 
                 # 添加编辑选项
                 edit_action = menu.addAction("编辑内容和描述(&E)")  # Alt+E
-                use_action = menu.addAction("使用选中项(&U)")  # Alt+U
                 copy_action = menu.addAction("复制到剪贴板(&C)")  # Alt+C
                 delete_action = menu.addAction("删除(&D)")  # Alt+D
                 
@@ -1493,7 +1492,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/3/27-01")
+        version_action = tray_menu.addAction("版本: 2025/3/27-02")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
@@ -1833,37 +1832,25 @@ class ClipboardHistoryApp(QMainWindow):
             
             # 添加编辑选项
             edit_action = menu.addAction("编辑(&E)")  # Alt+E
-            add_to_favorites = menu.addAction("添加到收藏(&A)")  # Alt+A
             delete_action = menu.addAction("删除(&D)")  # Alt+D
             
+            move_menu = menu.addMenu("移动到收藏夹(&V)")  # Alt+V
+            for folder in self.favorites.keys():
+                move_menu.addAction(folder)
+
             action = menu.exec(self.history_list.mapToGlobal(position))
             
-            if action == add_to_favorites:
-                print("选择了加到收藏选项")  # 调试信息
-                self.add_to_favorites(original_text)
-            elif action == edit_action:
-                print("选择了编辑选项")  # 调试信息
-                self.edit_history_item(self.history_list.currentRow())
-            elif action == delete_action:
-                print("选择了删除选项")  # 调试信息
-                self.delete_history_item()
-
-    def add_to_favorites(self, text):
-        """添加文本到当前收藏夹"""
-        # 创建新的收藏项
-        new_item = {
-            "text": text,
-            "description": ""
-        }
-        
-        # 检查是否已存在
-        existing_texts = [item["text"] for item in self.favorites[self.current_folder]]
-        if text not in existing_texts:
-            self.favorites[self.current_folder].insert(0, new_item)
-            truncated_text = self.truncate_text(text)
-            self.favorites_list.insertItem(0, truncated_text)
-            self.update_list_numbers(self.favorites_list)
-            self.save_favorites()
+            # 检查action是否为None
+            if action is not None:
+                if action == edit_action:
+                    print("选择了编辑选项")  # 调试信息
+                    self.edit_history_item(self.history_list.currentRow())
+                elif action == delete_action:
+                    print("选择了删除选项")  # 调试信息
+                    self.delete_history_item()
+                elif action.text() in self.favorites:
+                    self.move_to_folder_from_history(current_item, action.text())
+    
 
     def load_favorites(self):
         """从文件加载收藏记录"""
@@ -2063,7 +2050,7 @@ class ClipboardHistoryApp(QMainWindow):
                 elif action == delete_action:
                     self.delete_favorite()
                 elif action.text() in self.favorites:
-                    self.move_to_folder(favorite_item, action.text())
+                    self.move_to_folder_from_favorites(favorite_item, action.text())
 
     def create_new_folder(self, item_text):
         """创建新收藏夹并移动选中项"""
@@ -2085,7 +2072,7 @@ class ClipboardHistoryApp(QMainWindow):
             else:
                 QMessageBox.warning(self, "错误", "收藏夹名称已存在!")
 
-    def move_to_folder(self, item, target_folder):
+    def move_to_folder_from_favorites(self, item, target_folder):
         """移动条目到指定收藏夹"""
         if target_folder in self.favorites:
             # 确保使用字典格式
@@ -2102,6 +2089,30 @@ class ClipboardHistoryApp(QMainWindow):
             
             self.save_favorites()
             self.update_list_numbers(self.favorites_list)
+
+    def move_to_folder_from_history(self, item, target_folder):
+        """移动条目到指定收藏夹"""
+        if target_folder in self.favorites:
+            # 获取历史记录中的实际文本内容
+            current_row = self.history_list.currentRow()
+            if 0 <= current_row < len(self.clipboard_history):
+                text = self.clipboard_history[current_row]
+                
+                # 确保使用字典格式
+                new_item = {"text": text, "description": ""}
+                
+                # 添加到目标收藏夹
+                self.favorites[target_folder].append(new_item)
+                
+                # 更新显示
+                truncated_text = self.truncate_text(text)
+                self.favorites_list.insertItem(0, truncated_text)
+                
+                # 更新编号
+                self.update_list_numbers(self.favorites_list)
+                
+                # 保存更改
+                self.save_favorites()
 
     def change_folder(self, folder_name):
         """切换当前收藏夹"""
