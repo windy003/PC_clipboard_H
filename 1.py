@@ -1326,7 +1326,7 @@ class ClipboardHistoryApp(QMainWindow):
         
         # 双击列表项也触发粘贴
         self.history_list.itemDoubleClicked.connect(self.paste_selected)
-        
+        self.favorites_list.itemDoubleClicked.connect(self.paste_selected)
         
         
         # 创建预览窗口
