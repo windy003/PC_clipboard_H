@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import QApplication
 # 修改热键线程的实现
 class HotkeyThread(QThread):
     triggered = pyqtSignal()
-    error = pyqtSignal(str)  # 添加错误信号
+    error = pyqtSignal(str)
 
     def __init__(self, hotkey='ctrl+alt+z'):
         super().__init__()
@@ -30,6 +30,9 @@ class HotkeyThread(QThread):
         self.retry_count = 0
         self.max_retries = 3
         self.last_check_time = 0
+        self.check_interval = 30  # 每30秒检查一次热键状态
+        self.last_trigger_time = 0
+        self.min_trigger_interval = 0.5  # 最小触发间隔(秒)
         
     def run(self):
         while self.running:
@@ -40,33 +43,34 @@ class HotkeyThread(QThread):
                 # 重新注册热键
                 self.current_hotkey = keyboard.add_hotkey(self.hotkey, self.on_hotkey)
                 print(f"热键已注册: {self.hotkey}")
-                self.retry_count = 0  # 重置重试计数
-                self.last_check_time = time.time()  # 记录注册时间
+                self.retry_count = 0
+                self.last_check_time = time.time()
                 
-                # 主循环
                 while self.running:
                     self.msleep(100)
                     
-                    # 定期检查热键是否仍然有效（每60秒检查一次）
+                    # 定期检查热键状态
                     current_time = time.time()
-                    if current_time - self.last_check_time > 60:
+                    if current_time - self.last_check_time > self.check_interval:
                         print("定期检查热键状态...")
                         self.last_check_time = current_time
                         
-                        # 尝试重新注册热键以确保其有效
+                        # 主动测试热键是否仍然有效
                         try:
+                            # 先移除再重新注册来测试热键状态
                             keyboard.remove_hotkey(self.current_hotkey)
                             self.current_hotkey = keyboard.add_hotkey(self.hotkey, self.on_hotkey)
                             print(f"热键已刷新: {self.hotkey}")
                         except Exception as e:
                             print(f"热键刷新错误: {e}")
                             self.error.emit(str(e))
-                            break  # 跳出内循环，进入外循环重试
-                    
-                    # 如果重试次数达到上限，跳出循环
-                    if self.retry_count >= self.max_retries:
-                        break
+                            break
                         
+                        # 检查系统热键状态
+                        if not self.check_hotkey_status():
+                            print("热键状态异常，准备重新注册")
+                            break
+                            
             except Exception as e:
                 print(f"热键错误: {e}")
                 self.error.emit(str(e))
@@ -74,18 +78,35 @@ class HotkeyThread(QThread):
                 
                 if self.retry_count < self.max_retries:
                     print(f"尝试重新注册热键 (第 {self.retry_count} 次)")
-                    self.msleep(1000)  # 等待1秒后重试
+                    self.msleep(1000)
                     continue
                 else:
-                    print("热键重试次数已达上限")
-                    self.msleep(5000)  # 等待5秒后重置重试计数
+                    print("热键重试次数已达上限，等待后重置")
+                    self.msleep(5000)
                     self.retry_count = 0
 
     def on_hotkey(self):
-        print("热键被触发")
-        self.triggered.emit()
+        """热键触发处理"""
+        current_time = time.time()
+        # 检查是否满足最小触发间隔
+        if current_time - self.last_trigger_time >= self.min_trigger_interval:
+            print("热键被触发")
+            self.last_trigger_time = current_time
+            self.triggered.emit()
+
+    def check_hotkey_status(self):
+        """检查热键状态"""
+        try:
+            # 获取当前注册的所有热键
+            registered_hotkeys = keyboard._listener.handlers.keys()
+            # 检查我们的热键是否在其中
+            return any(self.hotkey in str(handler) for handler in registered_hotkeys)
+        except Exception as e:
+            print(f"检查热键状态时出错: {e}")
+            return False
 
     def stop(self):
+        """停止热键线程"""
         self.running = False
         try:
             if self.current_hotkey:
@@ -1335,7 +1356,27 @@ class ClipboardHistoryApp(QMainWindow):
         # 为两个列表添加选择变化事件
         self.history_list.currentItemChanged.connect(self.show_preview)
         self.favorites_list.currentItemChanged.connect(self.show_preview)
-
+        
+        # 创建热键状态检查定时器
+        self.hotkey_check_timer = QTimer()
+        self.hotkey_check_timer.timeout.connect(self.check_hotkey_threads)
+        self.hotkey_check_timer.start(60000)  # 每分钟检查一次
+        
+    def check_hotkey_threads(self):
+        """检查热键线程状态"""
+        try:
+            # 检查主热键线程
+            if not self.hotkey_thread.isRunning():
+                print("主热键线程已停止，正在重启...")
+                self.handle_hotkey_error()
+            
+            # 检查搜索热键线程
+            if not self.search_hotkey_thread.isRunning():
+                print("搜索热键线程已停止，正在重启...")
+                self.handle_search_hotkey_error()
+                
+        except Exception as e:
+            print(f"检查热键线程状态时出错: {e}")
 
     def show_preview(self, current, previous):
         """显示选中条目的完整内容"""
@@ -1505,7 +1546,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/3/27-02")
+        version_action = tray_menu.addAction("版本: 2025/04/10-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
