@@ -1,3 +1,9 @@
+# pyinstaller --noconfirm --onefile --windowed --icon=icon.ico --add-data "icon.ico;."   --add-data "icon.png;." 1.py   --name  "clipboard_H"
+
+
+
+
+
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidget, 
                            QVBoxLayout, QPushButton, QWidget, QSystemTrayIcon, QMenu,
                            QHBoxLayout, QStackedWidget, QLabel, QTextEdit, QDialog, QLineEdit, QMessageBox, QComboBox, QInputDialog, QFrame, QScrollArea, QCheckBox)
