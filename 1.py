@@ -378,6 +378,24 @@ class PreviewWindow(QWidget):
             QFrame#line {
                 background-color: #ccc;
             }
+            QPushButton#close_button {
+                background-color: #ff4444;
+                color: white;
+                border: none;
+                border-radius: 10px;
+                font-weight: bold;
+                font-size: 12px;
+                min-width: 20px;
+                max-width: 20px;
+                min-height: 20px;
+                max-height: 20px;
+            }
+            QPushButton#close_button:hover {
+                background-color: #ff6666;
+            }
+            QPushButton#close_button:pressed {
+                background-color: #cc3333;
+            }
             QScrollBar:vertical {
                 border: none;
                 background: #f0f0f0;
@@ -408,9 +426,31 @@ class PreviewWindow(QWidget):
             }
         """)
         
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(5)
+        # 主布局
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setSpacing(5)
+        
+        # 创建标题栏布局（包含关闭按钮）
+        title_layout = QHBoxLayout()
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 标题标签
+        title_label = QLabel("预览窗口")
+        title_label.setStyleSheet("font-weight: bold; color: #333; font-size: 14px;")
+        title_layout.addWidget(title_label)
+        
+        # 弹性空间
+        title_layout.addStretch()
+        
+        # 关闭按钮
+        self.close_button = QPushButton("×")
+        self.close_button.setObjectName("close_button")
+        self.close_button.setToolTip("关闭预览窗口 (Esc)")
+        self.close_button.clicked.connect(self.hide)
+        title_layout.addWidget(self.close_button)
+        
+        main_layout.addLayout(title_layout)
         
         # 创建一个滚动区域
         scroll_area = QScrollArea(self)
@@ -457,10 +497,17 @@ class PreviewWindow(QWidget):
         
         # 将容器放入滚动区域
         scroll_area.setWidget(container)
-        layout.addWidget(scroll_area)
+        main_layout.addWidget(scroll_area)
         
         self.setMinimumSize(300, 200)
         self.setMaximumSize(400, 600)  # 增加最大高度
+        
+        # 设置窗口属性，使其能够独立存在
+        self.setWindowFlags(
+            Qt.WindowType.Tool | 
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint
+        )
     
     def set_content(self, text, description=""):
         self.text_edit.setText(text)
@@ -473,6 +520,31 @@ class PreviewWindow(QWidget):
             self.description_label.hide()
             self.description_edit.hide()
             self.separator.hide()
+    
+    def keyPressEvent(self, event):
+        """处理按键事件"""
+        if event.key() == Qt.Key.Key_Escape:
+            self.hide()
+        else:
+            super().keyPressEvent(event)
+    
+    def mousePressEvent(self, event):
+        """处理鼠标按下事件，用于拖拽窗口"""
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            event.accept()
+    
+    def mouseMoveEvent(self, event):
+        """处理鼠标移动事件，实现窗口拖拽"""
+        if event.buttons() == Qt.MouseButton.LeftButton and hasattr(self, 'drag_position'):
+            self.move(event.globalPosition().toPoint() - self.drag_position)
+            event.accept()
+    
+    def focusOutEvent(self, event):
+        """当窗口失去焦点时的处理"""
+        # 可以选择在失去焦点时隐藏窗口，但这可能会影响用户体验
+        # 所以这里暂时不自动隐藏
+        super().focusOutEvent(event)
 
 class EditItemDialog(QDialog):
     """编辑条目对话框"""
@@ -1546,7 +1618,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/04/10-01")
+        version_action = tray_menu.addAction("版本: 2025/05/31-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
