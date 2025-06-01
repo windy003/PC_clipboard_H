@@ -1573,7 +1573,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/05/31-01")
+        version_action = tray_menu.addAction("版本: 2025/06/01-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
@@ -2435,10 +2435,20 @@ class ClipboardHistoryApp(QMainWindow):
                 if whole_word:
                     # 全字匹配的正则表达式
                     pattern = r'\b' + pattern + r'\b'
-                return bool(re.search(pattern, text, flags))
+                if bool(re.search(pattern, text, flags)):
+                    return True
+                elif bool(re.search(pattern, description, flags)):
+                    return True
+                else:
+                    return False
             except re.error:
                 # 正则表达式错误，使用普通搜索
-                return self.normal_search(text, pattern, case_sensitive, whole_word)
+                if self.normal_search(text, pattern, case_sensitive, whole_word):
+                    return True
+                elif self.normal_search(description, pattern, case_sensitive, whole_word):
+                    return True
+                else:
+                    return False
         else:
             # 普通搜索
             if self.normal_search(text, pattern, case_sensitive, whole_word):
