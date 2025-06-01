@@ -1052,59 +1052,6 @@ class SearchDialog(QDialog):
         if self.results_list.count() > 0:
             self.results_list.setCurrentRow(0)
     
-    def get_keyword_context(self, text, keyword, use_regex=False, case_sensitive=False, description=""):
-        """获取关键字在文本中的上下文"""
-        if not keyword:
-            return text[:50] + "..." if len(text) > 50 else text
-        
-        # 定义搜索函数
-        def find_match(search_text, pattern):
-            if use_regex:
-                try:
-                    flags = 0 if case_sensitive else re.IGNORECASE
-                    regex = re.compile(pattern, flags)
-                    match = regex.search(search_text)
-                    return match
-                except:
-                    return None
-            else:
-                if not case_sensitive:
-                    search_text = search_text.lower()
-                    pattern = pattern.lower()
-                
-                pos = search_text.find(pattern)
-                if pos >= 0:
-                    return type('Match', (), {'start': lambda: pos, 'end': lambda: pos + len(pattern)})
-                return None
-        
-        # 首先检查内容中是否有匹配
-        content_match = find_match(text, keyword)
-        
-        # 如果内容中有匹配，返回内容中的上下文
-        if content_match:
-            start_pos = max(0, content_match.start() - 20)
-            end_pos = min(len(text), content_match.end() + 20)
-            
-            prefix = "..." if start_pos > 0 else ""
-            suffix = "..." if end_pos < len(text) else ""
-            
-            return prefix + text[start_pos:end_pos] + suffix
-        
-        # 如果内容中没有匹配但有描述，检查描述中是否有匹配
-        if description:
-            desc_match = find_match(description, keyword)
-            if desc_match:
-                start_pos = max(0, desc_match.start() - 20)
-                end_pos = min(len(description), desc_match.end() + 20)
-                
-                prefix = "..." if start_pos > 0 else ""
-                suffix = "..." if end_pos < len(description) else ""
-                
-                return "[描述] " + prefix + description[start_pos:end_pos] + suffix
-        
-        # 如果都没有匹配，返回内容的前50个字符
-        return text[:50] + "..." if len(text) > 50 else text
-    
     def use_selected(self):
         """使用选中的搜索结果"""
         index = self.results_list.currentRow()
