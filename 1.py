@@ -1,4 +1,3 @@
-
 # pyinstaller   打包命令:
 # pyinstaller --noconfirm --onefile --windowed --icon=icon.ico --add-data "icon.ico;."   --add-data "icon.png;." 1.py   --name  "clipboard_H"
 
@@ -1130,14 +1129,35 @@ class SearchDialog(QDialog):
             self.preview_window.hide()
             return
         
-        index = self.results_list.currentRow()
-        if 0 <= index < len(self.results):
-            try:
-                # 修改这里：只解包三个值
-                source, text, description = self.results[index]
+        # 只有当主窗口可见时才显示预览窗口
+        if not self.isVisible():
+            return
+        
+        current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
+        current_row = current_list.currentRow()
+        
+        try:
+            if self.stacked_widget.currentIndex() == 0:
+                # 历史记录面板
+                data_list = self.clipboard_history
+                original_text = data_list[current_row]
+                description = ""
+            else:
+                # 收藏夹面板
+                data_list = self.favorites[self.current_folder]
+                item = data_list[current_row]
+                # 处理新旧格式数据
+                if isinstance(item, str):
+                    original_text = item
+                    description = ""
+                else:
+                    original_text = item["text"]
+                    description = item.get("description", "")
+            
+            if 0 <= current_row < len(data_list):
+                # 移除条件判断，总是显示预览窗口
+                self.preview_window.set_content(original_text, description)
                 
-                self.preview_window.set_content(text, description)
-
                 # 计算预览窗口的位置
                 screen = QApplication.primaryScreen().geometry()
                 preview_width = self.preview_window.width()
@@ -1154,16 +1174,9 @@ class SearchDialog(QDialog):
                 preview_y = self.y()
                 
                 self.preview_window.move(preview_x, preview_y)
-
                 self.preview_window.show()
-
-
-                
-            except Exception as e:
-                print(f"显示预览时出错: {e}")
-                if hasattr(self, 'preview_window'):
-                    self.preview_window.hide()
-        else:
+        except Exception as e:
+            print(f"预览显示错误: {e}")
             self.preview_window.hide()
     
 
@@ -1411,6 +1424,10 @@ class ClipboardHistoryApp(QMainWindow):
             self.preview_window.hide()
             return
         
+        # 只有当主窗口可见时才显示预览窗口
+        if not self.isVisible():
+            return
+        
         current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
         current_row = current_list.currentRow()
         
@@ -1573,7 +1590,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/06/01-01")
+        version_action = tray_menu.addAction("版本: 2025/06/08-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
