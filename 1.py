@@ -1,10 +1,3 @@
-# pyinstaller   打包命令:
-# pyinstaller --noconfirm --onefile --windowed --icon=icon.ico --add-data "icon.ico;."   --add-data "icon.png;." 1.py   --name  "clipboard_H"
-
-# 重要文件路径:
-# "C:\Users\windy\.clipboard_favorites.json"
-
-
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidget, 
                            QVBoxLayout, QPushButton, QWidget, QSystemTrayIcon, QMenu,
                            QHBoxLayout, QStackedWidget, QLabel, QTextEdit, QDialog, QLineEdit, QMessageBox, QComboBox, QInputDialog, QFrame, QScrollArea, QCheckBox)
@@ -1500,8 +1493,8 @@ class ClipboardHistoryApp(QMainWindow):
             print(f"截断后文本: {truncated_text}")  # 调试输出
             self.history_list.insertItem(0, truncated_text)
             
-            # 如果历史记录超过10个，删除多余的条目
-            while len(self.clipboard_history) > 10:
+            # 如果历史记录超过30个，删除多余的条目
+            while len(self.clipboard_history) > 30:
                 self.clipboard_history.pop()
                 self.history_list.takeItem(self.history_list.count() - 1)
             
@@ -1590,7 +1583,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/06/08-01")
+        version_action = tray_menu.addAction("版本: 2025/06/29-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
