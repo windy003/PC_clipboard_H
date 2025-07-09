@@ -1198,7 +1198,7 @@ class ClipboardHistoryApp(QMainWindow):
         top_layout.addWidget(self.panel_label)
         
         # 添加提示文字
-        hint_label = QLabel("(按左右方向键以切换历史和收藏面板)")
+        hint_label = QLabel("(按左右方向键以切换历史和收藏面板，按数字1-9或.10、..20等快速选择)")
         hint_label.setStyleSheet("color: gray;")  # 使提示文字颜色变淡
         top_layout.addWidget(hint_label)
         
@@ -1394,6 +1394,13 @@ class ClipboardHistoryApp(QMainWindow):
         self.hotkey_check_timer = QTimer()
         self.hotkey_check_timer.timeout.connect(self.check_hotkey_threads)
         self.hotkey_check_timer.start(60000)  # 每分钟检查一次
+        
+        # 用于处理编号输入的变量
+        self.number_input_buffer = ""
+        self.number_input_timer = QTimer()
+        self.number_input_timer.setSingleShot(True)
+        self.number_input_timer.timeout.connect(self.clear_number_input)
+        self.number_input_timer.setInterval(2000)  # 2秒后清空输入缓冲
         
     def check_hotkey_threads(self):
         """检查热键线程状态"""
@@ -1639,6 +1646,11 @@ class ClipboardHistoryApp(QMainWindow):
 
     def list_key_press(self, event: QKeyEvent):
         """处理列表的按键事件"""
+        # 首先检查是否在编号输入模式
+        if self.number_input_buffer:
+            if self.handle_number_input(event.key()):
+                return  # 已处理，直接返回
+        
         if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
             self.paste_selected()
         elif event.key() == Qt.Key.Key_Escape:
@@ -1707,6 +1719,13 @@ class ClipboardHistoryApp(QMainWindow):
             if index < current_list.count():
                 current_list.setCurrentRow(index)
                 self.paste_selected()
+        # 处理点号键，开始输入编号
+        elif event.key() == Qt.Key.Key_Period:
+            self.start_number_input()
+        # 处理数字键 0（在编号输入模式之外）
+        elif event.key() == Qt.Key.Key_0:
+            # 数字0只在编号输入模式中有效，这里不做处理
+            pass
         else:
             # 保持其他按键的默认行为
             QListWidget.keyPressEvent(self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list, event)
@@ -2106,10 +2125,29 @@ class ClipboardHistoryApp(QMainWindow):
             item = list_widget.item(i)
             text = item.text()
             # 移除可能存在的旧编号
-            if text.find('. ') == 1 or text.find('. ') == 2:  # 只有当点号在第2或第3个位置时才认为是编号
-                text = text.split('. ', 1)[1]
-            # 添加新编号
-            item.setText(f"{i+1}. {text}")
+            # 查找编号模式: 数字., .数字., ..数字., ...数字. 等
+            import re
+            # 匹配开头的编号模式：可选的点号 + 数字 + 点号 + 空格
+            pattern = r'^(\.*\d+\. )'
+            match = re.match(pattern, text)
+            if match:
+                text = text[len(match.group(1)):]
+            
+            # 生成新编号
+            number = i + 1
+            if number <= 9:
+                # 1-9: 直接数字
+                prefix = f"{number}. "
+            else:
+                # 10及以上: 根据十位数确定点号数量
+                # 10-19: 1个点 (.10, .11, ...)
+                # 20-29: 2个点 (..20, ..21, ...)
+                # 30-39: 3个点 (...30, ...)
+                # 以此类推
+                dot_count = (number - 1) // 10
+                prefix = f"{'.' * dot_count}{number}. "
+            
+            item.setText(f"{prefix}{text}")
 
     def show_favorites_context_menu(self, position):
         """显示收藏夹的右键菜单"""
@@ -2508,6 +2546,99 @@ class ClipboardHistoryApp(QMainWindow):
     def set_content(self, text, description=""):
         """设置预览窗口内容"""
         self.preview_window.set_content(text, description)
+    
+    def start_number_input(self):
+        """开始编号输入"""
+        self.number_input_buffer = "."
+        self.number_input_timer.start()
+        print(f"开始编号输入: {self.number_input_buffer}")
+    
+    def clear_number_input(self):
+        """清空编号输入缓冲"""
+        self.number_input_buffer = ""
+        print("清空编号输入缓冲")
+    
+    def handle_number_input(self, key):
+        """处理编号输入"""
+        if Qt.Key.Key_0 <= key <= Qt.Key.Key_9:
+            digit = str(key - Qt.Key.Key_0)
+            self.number_input_buffer += digit
+            self.number_input_timer.start()  # 重新开始计时
+            print(f"输入数字: {digit}, 当前缓冲: {self.number_input_buffer}")
+            
+            # 尝试解析并跳转到对应条目
+            self.try_jump_to_item()
+            return True
+        elif key == Qt.Key.Key_Period:
+            self.number_input_buffer += "."
+            self.number_input_timer.start()
+            print(f"输入点号, 当前缓冲: {self.number_input_buffer}")
+            return True
+        else:
+            # 其他键，清空缓冲
+            self.clear_number_input()
+            return False
+    
+    def try_jump_to_item(self):
+        """尝试跳转到对应的条目"""
+        if not self.number_input_buffer:
+            return
+        
+        # 解析输入的编号
+        try:
+            # 计算点号数量
+            dot_count = 0
+            number_str = self.number_input_buffer
+            while number_str.startswith('.'):
+                dot_count += 1
+                number_str = number_str[1:]
+            
+            if not number_str:
+                return  # 还没有输入数字
+            
+            number = int(number_str)
+            
+            # 根据点号数量和数字计算实际索引
+            if dot_count == 0:
+                # 直接数字 1-9
+                if 1 <= number <= 9:
+                    index = number - 1
+                else:
+                    return
+            else:
+                # 有点号的情况
+                # 验证数字是否在正确的范围内
+                expected_range_start = dot_count * 10
+                expected_range_end = expected_range_start + 9
+                if expected_range_start <= number <= expected_range_end:
+                    index = number - 1
+                else:
+                    return
+            
+            # 跳转到对应条目
+            current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
+            if 0 <= index < current_list.count():
+                current_list.setCurrentRow(index)
+                print(f"跳转到条目 {index + 1}")
+                
+                # 如果输入完整，立即执行粘贴
+                if self.is_complete_number_input(dot_count, number):
+                    self.paste_selected()
+                    self.clear_number_input()
+        
+        except ValueError:
+            # 数字解析失败
+            pass
+    
+    def is_complete_number_input(self, dot_count, number):
+        """判断是否是完整的编号输入"""
+        if dot_count == 0:
+            return 1 <= number <= 9
+        else:
+            # 有点号的情况
+            expected_range_start = dot_count * 10
+            expected_range_end = expected_range_start + 9
+            return expected_range_start <= number <= expected_range_end
 
     def show_panel_search(self):
         """显示当前面板的搜索对话框"""
