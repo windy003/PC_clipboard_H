@@ -1198,7 +1198,7 @@ class ClipboardHistoryApp(QMainWindow):
         top_layout.addWidget(self.panel_label)
         
         # 添加提示文字
-        hint_label = QLabel("(按左右方向键以切换历史和收藏面板，按数字1-9或.10、..20等快速选择)")
+        hint_label = QLabel("(按左右方向键以切换历史和收藏面板)")
         hint_label.setStyleSheet("color: gray;")  # 使提示文字颜色变淡
         top_layout.addWidget(hint_label)
         
@@ -1590,7 +1590,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/06/29-01")
+        version_action = tray_menu.addAction("版本: 2025/07/09-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
