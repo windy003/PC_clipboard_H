@@ -648,6 +648,11 @@ class SearchDialog(QDialog):
         self.resize(500, 400)  # 增加对话框尺寸以容纳搜索结果
         self.parent_app = parent
         
+        # 设置对话框属性，确保能够正常接收输入
+        self.setModal(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, False)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        
         layout = QVBoxLayout(self)
         
         # 搜索框
@@ -655,6 +660,11 @@ class SearchDialog(QDialog):
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("输入搜索关键词(&D)")  # 添加Alt+D快捷键提示
         self.search_input.textChanged.connect(self.on_search_text_changed)  # 连接文本变化信号
+        # 确保搜索框是启用状态
+        self.search_input.setEnabled(True)
+        self.search_input.setReadOnly(False)
+        # 设置焦点策略
+        self.search_input.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         # 为搜索框添加按键事件过滤器
         self.search_input.installEventFilter(self)
         search_layout.addWidget(self.search_input)
@@ -729,24 +739,39 @@ class SearchDialog(QDialog):
         # 存储搜索结果
         self.results = []  # 确保初始化 results 列表
         
-
-
+        # 创建预览窗口但不显示
         self.preview_window = PreviewWindow()
+        self.preview_window.hide()  # 确保预览窗口不会干扰焦点
 
         
-        # 设置焦点到搜索框
-        self.search_input.setFocus()
-        
-        # 设置窗口标志，使其保持在最前面
-        self.setWindowFlags(
-            Qt.WindowType.Window |
-            Qt.WindowType.WindowStaysOnTopHint
-        )
+        # 设置窗口标志，使其保持在最前面（必须在设置焦点前调用）
+        # 暂时移除WindowStaysOnTopHint，它可能导致焦点问题
+        # self.setWindowFlags(
+        #     Qt.WindowType.Window |
+        #     Qt.WindowType.WindowStaysOnTopHint
+        # )
         
         # 添加提示标签
         hint_label = QLabel("提示: 选中条目后按E键或右键可编辑内容和描述")
         hint_label.setStyleSheet("color: gray; font-style: italic;")
         layout.addWidget(hint_label)
+        
+        # 设置焦点到搜索框（必须在setWindowFlags之后调用）
+        self.search_input.setFocus()
+    
+    def showEvent(self, event):
+        """重写showEvent确保搜索框获得焦点"""
+        super().showEvent(event)
+        # 确保对话框激活并设置焦点
+        self.raise_()
+        self.activateWindow()
+        # 延迟设置焦点，确保窗口完全显示后再设置
+        QTimer.singleShot(100, self._set_focus_delayed)
+    
+    def _set_focus_delayed(self):
+        """延迟设置焦点"""
+        self.search_input.setFocus()
+        self.search_input.selectAll()  # 选中所有文本（如果有的话）
     
     def show_scope_menu(self):
         """显示搜索范围下拉菜单"""
@@ -761,8 +786,12 @@ class SearchDialog(QDialog):
             if i == self.scope_combo.currentIndex() and self.scope_combo.currentText() == scope:
                 action.setIcon(QIcon.fromTheme("dialog-ok"))
             
+            # 修复闭包问题：使用偏函数或默认参数来正确捕获变量值
+            def make_scope_handler(scope_name, index):
+                return lambda checked: self.set_search_scope(scope_name, index)
+            
             # 连接动作信号
-            action.triggered.connect(lambda checked, idx=i, s=scope: self.set_search_scope(s, idx))
+            action.triggered.connect(make_scope_handler(scope, i))
         
         # 添加分隔线
         menu.addSeparator()
@@ -773,11 +802,15 @@ class SearchDialog(QDialog):
             for folder_name in sorted(self.parent_app.favorites.keys()):
                 action = submenu.addAction(folder_name)
                 # 标记当前选中的收藏夹
-                if self.scope_combo.currentText() == f"收藏夹: {folder_name}":
+                if self.scope_combo.currentText() == f"收藏夹-{folder_name}":
                     action.setIcon(QIcon.fromTheme("dialog-ok"))
                 
+                # 修复闭包问题：使用偏函数或默认参数来正确捕获变量值
+                def make_folder_handler(folder):
+                    return lambda checked: self.set_folder_scope(folder)
+                
                 # 连接动作信号
-                action.triggered.connect(lambda checked, name=folder_name: self.set_folder_scope(name))
+                action.triggered.connect(make_folder_handler(folder_name))
         
         # 在按钮下方显示菜单
         button_pos = self.scope_button.mapToGlobal(QPoint(0, self.scope_button.height()))
@@ -823,7 +856,10 @@ class SearchDialog(QDialog):
                 move_to_favorites_menu = menu.addMenu("移动到收藏夹(&M)")  # Alt+M
                 for folder in self.parent_app.favorites.keys():
                     move_action = move_to_favorites_menu.addAction(folder)
-                    move_action.triggered.connect(lambda checked, f=folder: self.move_to_folder_from_results(index, f))
+                    # 修复闭包问题：使用偏函数来正确捕获变量值
+                    def make_move_handler(folder_name, item_index):
+                        return lambda checked: self.move_to_folder_from_results(item_index, folder_name)
+                    move_action.triggered.connect(make_move_handler(folder, index))
                 
                 # 获取当前条目的矩形区域
                 item_rect = self.results_list.visualItemRect(current_item)
@@ -1178,39 +1214,24 @@ class SearchDialog(QDialog):
 
 
     def show_preview(self, current, previous):
-        """显示选中条目的预览"""
+        """显示选中搜索结果的预览"""
         if not current:
             self.preview_window.hide()
             return
         
-        # 只有当主窗口可见时才显示预览窗口
+        # 只有当搜索对话框可见时才显示预览窗口
         if not self.isVisible():
             return
         
-        current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
-        current_row = current_list.currentRow()
+        current_row = self.results_list.currentRow()
         
         try:
-            if self.stacked_widget.currentIndex() == 0:
-                # 历史记录面板
-                data_list = self.clipboard_history
-                original_text = data_list[current_row]
-                description = ""
-            else:
-                # 收藏夹面板
-                data_list = self.favorites[self.current_folder]
-                item = data_list[current_row]
-                # 处理新旧格式数据
-                if isinstance(item, str):
-                    original_text = item
-                    description = ""
-                else:
-                    original_text = item["text"]
-                    description = item.get("description", "")
-            
-            if 0 <= current_row < len(data_list):
-                # 移除条件判断，总是显示预览窗口
-                self.preview_window.set_content(original_text, description)
+            if 0 <= current_row < len(self.results):
+                # 从搜索结果中获取数据
+                source, text, description = self.results[current_row]
+                
+                # 显示预览窗口
+                self.preview_window.set_content(text, description)
                 
                 # 计算预览窗口的位置
                 screen = QApplication.primaryScreen().geometry()
@@ -1219,7 +1240,7 @@ class SearchDialog(QDialog):
                 # 计算预览窗口的理想x坐标
                 ideal_x = self.x() + self.width() + 10
                 
-                # 如果预览窗口会超出屏幕右边界，则将其放在主窗口左侧
+                # 如果预览窗口会超出屏幕右边界，则将其放在对话框左侧
                 if ideal_x + preview_width > screen.right():
                     preview_x = self.x() - preview_width - 10
                 else:
@@ -1230,7 +1251,7 @@ class SearchDialog(QDialog):
                 self.preview_window.move(preview_x, preview_y)
                 self.preview_window.show()
         except Exception as e:
-            print(f"预览显示错误: {e}")
+            print(f"搜索预览显示错误: {e}")
             self.preview_window.hide()
     
 
@@ -1738,7 +1759,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/07/14-01")
+        version_action = tray_menu.addAction("版本: 2025/07/18-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
@@ -2736,6 +2757,9 @@ class ClipboardHistoryApp(QMainWindow):
     def show_search_dialog(self):
         """显示搜索对话框"""
         dialog = SearchDialog(self)
+        # 设置对话框属性，确保它能获得输入焦点
+        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        dialog.setModal(True)
         dialog.exec()
     
     def search_items(self, search_text, use_regex, scope, case_sensitive=False, whole_word=False):
