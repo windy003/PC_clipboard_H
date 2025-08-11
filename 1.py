@@ -30,7 +30,7 @@ class HotkeyThread(QThread):
         self.retry_count = 0
         self.max_retries = 5  # 增加最大重试次数
         self.last_check_time = 0
-        self.check_interval = 15  # 减少检查间隔，更频繁地检查热键状态
+        self.check_interval = 30  # 适当增加检查间隔，减少资源消耗
         self.last_trigger_time = 0
         self.min_trigger_interval = 0.3  # 减少最小触发间隔
         self.force_restart_count = 0
@@ -63,13 +63,7 @@ class HotkeyThread(QThread):
                             self.error.emit("热键状态检查失败")
                             break
                         
-                        # 定期刷新热键注册以确保稳定性
-                        try:
-                            self.refresh_hotkey()
-                        except Exception as e:
-                            print(f"热键刷新错误: {e}")
-                            self.error.emit(str(e))
-                            break
+                        # 移除频繁的热键刷新，避免冲突
                             
             except Exception as e:
                 print(f"热键错误: {e}")
@@ -124,41 +118,22 @@ class HotkeyThread(QThread):
             print(f"热键触发被忽略，间隔过短: {current_time - self.last_trigger_time:.2f}s")
 
     def is_hotkey_active(self):
-        """更强健的热键状态检查"""
+        """简化的热键状态检查"""
         try:
-            # 方法1: 检查keyboard库的内部状态
-            if hasattr(keyboard, '_listener') and keyboard._listener:
-                handlers = getattr(keyboard._listener, 'handlers', {})
-                if handlers:
-                    # 检查我们的热键是否在已注册的处理器中
-                    hotkey_found = False
-                    for handler_key in handlers.keys():
-                        if str(handler_key).find(self.hotkey.replace('+', '')) != -1:
-                            hotkey_found = True
-                            break
-                    
-                    if not hotkey_found:
-                        print("热键在处理器列表中未找到")
-                        return False
-            
-            # 方法2: 检查当前热键句柄是否有效
+            # 简单有效的检查方法：只检查热键句柄是否存在
             if self.current_hotkey is None:
                 print("热键句柄为空")
                 return False
             
-            # 方法3: 尝试获取热键信息
-            try:
-                # 尝试访问热键的内部信息
-                if hasattr(self.current_hotkey, '__dict__'):
-                    return True
-            except:
-                print("热键句柄无效")
+            # 检查keyboard库是否还在监听
+            if hasattr(keyboard, '_listener') and keyboard._listener:
+                return True
+            else:
+                print("keyboard监听器不活跃")
                 return False
             
-            return True
-            
         except Exception as e:
-            print(f"检查热键状态时出错: {e}")
+            print(f"热键状态检查出错: {e}")
             return False
 
     def stop(self):
@@ -1434,7 +1409,7 @@ class ClipboardHistoryApp(QMainWindow):
         self.load_config()
         
         # 创建并启动热键线程
-        self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+alt+z'))
+        self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+win+a'))
         self.hotkey_thread.triggered.connect(self.show_window)
         self.hotkey_thread.error.connect(self.handle_hotkey_error)  # 连接错误处理
         self.hotkey_thread.start()
@@ -1475,7 +1450,7 @@ class ClipboardHistoryApp(QMainWindow):
         # 创建热键状态检查定时器
         self.hotkey_check_timer = QTimer()
         self.hotkey_check_timer.timeout.connect(self.check_hotkey_threads)
-        self.hotkey_check_timer.start(30000)  # 减少到每30秒检查一次，更及时发现问题
+        self.hotkey_check_timer.start(60000)  # 改为每60秒检查一次，减少频率
         
         # 用于处理编号输入的变量
         self.number_input_buffer = ""
@@ -1759,7 +1734,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/07/18-01")
+        version_action = tray_menu.addAction("版本: 2025/08/11-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
@@ -2254,7 +2229,7 @@ class ClipboardHistoryApp(QMainWindow):
 
     def show_settings(self):
         """显示设置对话框"""
-        dialog = HotkeySettingDialog(self, self.config.get('hotkey', 'ctrl+alt+z'))
+        dialog = HotkeySettingDialog(self, self.config.get('hotkey', 'ctrl+win+a'))
         if dialog.exec() == QDialog.DialogCode.Accepted:
             new_hotkey = dialog.new_hotkey
             if new_hotkey != self.config.get('hotkey'):
@@ -2275,10 +2250,10 @@ class ClipboardHistoryApp(QMainWindow):
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     self.config = json.load(f)
             else:
-                self.config = {'hotkey': 'ctrl+alt+z'}
+                self.config = {'hotkey': 'ctrl+win+a'}
         except Exception as e:
             print(f"加载配置出错: {e}")
-            self.config = {'hotkey': 'ctrl+alt+z'}
+            self.config = {'hotkey': 'ctrl+win+a'}
 
     def save_config(self):
         """保存配置"""
