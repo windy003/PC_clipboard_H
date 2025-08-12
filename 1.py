@@ -22,7 +22,7 @@ class HotkeyThread(QThread):
     triggered = pyqtSignal()
     error = pyqtSignal(str)
 
-    def __init__(self, hotkey='ctrl+alt+z'):
+    def __init__(self, hotkey='ctrl+windows+a'):
         super().__init__()
         self.running = True
         self.hotkey = hotkey
@@ -154,7 +154,7 @@ class HotkeyThread(QThread):
 
 class HotkeySettingDialog(QDialog):
     """热键设置对话框"""
-    def __init__(self, parent=None, current_hotkey="ctrl+alt+z"):
+    def __init__(self, parent=None, current_hotkey="ctrl+windows+a"):
         super().__init__(parent)
         self.setWindowTitle("设置快捷键")
         self.setFixedSize(300, 150)
@@ -185,7 +185,7 @@ class HotkeySettingDialog(QDialog):
             Qt.Key.Key_Control: 'ctrl',
             Qt.Key.Key_Alt: 'alt',
             Qt.Key.Key_Shift: 'shift',
-            Qt.Key.Key_Meta: 'win',
+            Qt.Key.Key_Meta: 'windows',
         }
         
         # 获取按键
@@ -203,7 +203,7 @@ class HotkeySettingDialog(QDialog):
         if modifiers & Qt.KeyboardModifier.ShiftModifier:
             current_keys.add('shift')
         if modifiers & Qt.KeyboardModifier.MetaModifier:
-            current_keys.add('win')
+            current_keys.add('windows')
         
         # 处理特殊键
         if key in special_keys:
@@ -1409,7 +1409,7 @@ class ClipboardHistoryApp(QMainWindow):
         self.load_config()
         
         # 创建并启动热键线程
-        self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+win+a'))
+        self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+windows+a'))
         self.hotkey_thread.triggered.connect(self.show_window)
         self.hotkey_thread.error.connect(self.handle_hotkey_error)  # 连接错误处理
         self.hotkey_thread.start()
@@ -1514,7 +1514,7 @@ class ClipboardHistoryApp(QMainWindow):
     def create_new_main_hotkey_thread(self):
         """创建新的主热键线程"""
         try:
-            self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+alt+z'))
+            self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+windows+a'))
             self.hotkey_thread.triggered.connect(self.show_window)
             self.hotkey_thread.error.connect(self.handle_hotkey_error)
             self.hotkey_thread.start()
@@ -1734,7 +1734,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/08/11-01")
+        version_action = tray_menu.addAction("版本: 2025/08/13-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
@@ -2229,7 +2229,7 @@ class ClipboardHistoryApp(QMainWindow):
 
     def show_settings(self):
         """显示设置对话框"""
-        dialog = HotkeySettingDialog(self, self.config.get('hotkey', 'ctrl+win+a'))
+        dialog = HotkeySettingDialog(self, self.config.get('hotkey', 'ctrl+windows+a'))
         if dialog.exec() == QDialog.DialogCode.Accepted:
             new_hotkey = dialog.new_hotkey
             if new_hotkey != self.config.get('hotkey'):
@@ -2250,10 +2250,10 @@ class ClipboardHistoryApp(QMainWindow):
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     self.config = json.load(f)
             else:
-                self.config = {'hotkey': 'ctrl+win+a'}
+                self.config = {'hotkey': 'ctrl+windows+a'}
         except Exception as e:
             print(f"加载配置出错: {e}")
-            self.config = {'hotkey': 'ctrl+win+a'}
+            self.config = {'hotkey': 'ctrl+windows+a'}
 
     def save_config(self):
         """保存配置"""
@@ -2530,13 +2530,13 @@ class ClipboardHistoryApp(QMainWindow):
         """重新创建主热键线程"""
         try:
             # 创建新的热键线程
-            self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+alt+z'))
+            self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+windows+a'))
             self.hotkey_thread.triggered.connect(self.show_window)
             self.hotkey_thread.error.connect(self.handle_hotkey_error)
             self.hotkey_thread.start()
             
             # 显示通知
-            self.tray_icon.showMessage("热键已重置", f"快捷键 {self.config.get('hotkey', 'ctrl+alt+z')} 已重新注册", QSystemTrayIcon.MessageIcon.Information, 3000)
+            self.tray_icon.showMessage("热键已重置", f"快捷键 {self.config.get('hotkey', 'ctrl+windows+a')} 已重新注册", QSystemTrayIcon.MessageIcon.Information, 3000)
             print("主热键线程重新创建完成")
             
         except Exception as e:
@@ -2882,7 +2882,7 @@ class ClipboardHistoryApp(QMainWindow):
             print("重新创建所有热键线程...")
             
             # 创建主热键线程
-            self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+alt+z'))
+            self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+windows+a'))
             self.hotkey_thread.triggered.connect(self.show_window)
             self.hotkey_thread.error.connect(self.handle_hotkey_error)
             self.hotkey_thread.start()
