@@ -1734,7 +1734,7 @@ class ClipboardHistoryApp(QMainWindow):
         tray_menu.addSeparator()
         
         # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/08/13-01")
+        version_action = tray_menu.addAction("版本: 2025/08/20-01")
         version_action.setEnabled(False)  # 设置为不可点击
         
         # 添加分隔线
@@ -2044,7 +2044,31 @@ class ClipboardHistoryApp(QMainWindow):
         self.show()
         self.raise_()
         self.activateWindow()
-        self.favorites_list.setFocus()  # 修改这里，设置焦点到收藏列表
+        
+        # 强制窗口置顶并获得焦点 - 修复首次运行时的激活问题
+        self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized | Qt.WindowState.WindowActive)
+        
+        # 在 Windows 上使用额外的方法来确保窗口获得焦点
+        import platform
+        if platform.system() == "Windows":
+            try:
+                import ctypes
+                from ctypes import wintypes
+                
+                # 获取窗口句柄
+                hwnd = int(self.winId())
+                
+                # 强制窗口到前台
+                ctypes.windll.user32.SetForegroundWindow(hwnd)
+                ctypes.windll.user32.BringWindowToTop(hwnd)
+                ctypes.windll.user32.SetActiveWindow(hwnd)
+                
+            except ImportError:
+                pass  # 如果无法导入 ctypes，使用默认方法
+        
+        # 使用定时器延迟设置焦点，确保窗口完全显示后再获得焦点
+        QTimer.singleShot(50, lambda: self.favorites_list.setFocus())  # 修改这里，设置焦点到收藏列表
+        QTimer.singleShot(100, lambda: self.activateWindow())  # 再次激活窗口
 
     def __del__(self):
         """确保程序退出时清理热键"""
