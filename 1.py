@@ -2288,7 +2288,7 @@ class ClipboardHistoryApp(QMainWindow):
                 # 20-29: 2个点 (..20, ..21, ...)
                 # 30-39: 3个点 (...30, ...)
                 # 以此类推
-                dot_count = (number - 1) // 10
+                dot_count = number // 10
                 prefix = f"{'.' * dot_count}{number}. "
             
             item.setText(f"{prefix}{text}")
