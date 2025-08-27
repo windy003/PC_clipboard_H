@@ -30,7 +30,7 @@ class HotkeyThread(QThread):
         self.retry_count = 0
         self.max_retries = 5  # 增加最大重试次数
         self.last_check_time = 0
-        self.check_interval = 30  # 适当增加检查间隔，减少资源消耗
+        self.check_interval = 180  # 增加检查间隔到3分钟，大幅减少资源消耗
         self.last_trigger_time = 0
         self.min_trigger_interval = 0.3  # 减少最小触发间隔
         self.force_restart_count = 0
@@ -72,7 +72,9 @@ class HotkeyThread(QThread):
                 
                 if self.retry_count < self.max_retries:
                     print(f"尝试重新注册热键 (第 {self.retry_count} 次)")
-                    self.msleep(1000 * self.retry_count)  # 递增延迟
+                    # 使用指数退避算法，延迟时间逐渐增加
+                    delay = min(2000 * (2 ** (self.retry_count - 1)), 16000)  # 最多延迟16秒
+                    self.msleep(delay)
                     continue
                 else:
                     print("热键重试次数已达上限，进入强制重启模式")
@@ -91,7 +93,12 @@ class HotkeyThread(QThread):
             if self.current_hotkey is not None:
                 keyboard.remove_hotkey(self.current_hotkey)
                 self.current_hotkey = None
+                # 添加短暂延迟确保清理完成
+                time.sleep(0.1)
                 print("已清理旧的热键注册")
+            # 清理所有热键注册，确保完全清理
+            keyboard.unhook_all_hotkeys()
+            time.sleep(0.1)  # 再次延迟确保清理完成
         except Exception as e:
             print(f"清理热键时出错: {e}")
 
@@ -1450,7 +1457,7 @@ class ClipboardHistoryApp(QMainWindow):
         # 创建热键状态检查定时器
         self.hotkey_check_timer = QTimer()
         self.hotkey_check_timer.timeout.connect(self.check_hotkey_threads)
-        self.hotkey_check_timer.start(60000)  # 改为每60秒检查一次，减少频率
+        self.hotkey_check_timer.start(300000)  # 改为每5分钟检查一次，大幅减少频率
         
         # 用于处理编号输入的变量
         self.number_input_buffer = ""
@@ -2066,9 +2073,17 @@ class ClipboardHistoryApp(QMainWindow):
             except ImportError:
                 pass  # 如果无法导入 ctypes，使用默认方法
         
+        # 记录窗口显示时间，用于防止立即隐藏
+        self._window_show_time = time.time()
+        
         # 使用定时器延迟设置焦点，确保窗口完全显示后再获得焦点
         QTimer.singleShot(50, lambda: self.favorites_list.setFocus())  # 修改这里，设置焦点到收藏列表
         QTimer.singleShot(100, lambda: self.activateWindow())  # 再次激活窗口
+
+    def _delayed_hide(self):
+        """延迟隐藏窗口，只有当窗口真的失去焦点时才隐藏"""
+        if not self.isActiveWindow() and not self.favorites_list.hasFocus():
+            self.hide()
 
     def __del__(self):
         """确保程序退出时清理热键"""
@@ -2082,8 +2097,14 @@ class ClipboardHistoryApp(QMainWindow):
     def eventFilter(self, obj, event):
         """事件过滤器，处理窗口事件"""
         if event.type() == event.Type.WindowDeactivate:
-            # 当窗口失去焦点时隐藏
-            self.hide()
+            # 添加延迟检查，避免窗口刚显示时立即隐藏
+            if hasattr(self, '_window_show_time'):
+                current_time = time.time()
+                # 窗口显示后至少等待500毫秒再允许自动隐藏
+                if current_time - self._window_show_time > 0.5:
+                    QTimer.singleShot(100, self._delayed_hide)  # 延迟隐藏
+            else:
+                QTimer.singleShot(100, self._delayed_hide)
         elif event.type() == event.Type.Close:
             # 处理 Alt+F4
             self.hide()
@@ -2547,8 +2568,9 @@ class ClipboardHistoryApp(QMainWindow):
         except Exception as e:
             print(f"停止热键线程时出错: {e}")
         
-        # 延迟一段时间后重新创建线程，避免资源冲突
-        QTimer.singleShot(1500, self.recreate_main_hotkey_thread)
+        # 使用指数退避算法，延迟时间逐渐增加
+        delay = min(3000 * (2 ** self.hotkey_restart_count), 30000)  # 最多延迟30秒
+        QTimer.singleShot(delay, self.recreate_main_hotkey_thread)
 
     def recreate_main_hotkey_thread(self):
         """重新创建主热键线程"""
@@ -2589,8 +2611,9 @@ class ClipboardHistoryApp(QMainWindow):
         except Exception as e:
             print(f"停止搜索热键线程时出错: {e}")
         
-        # 延迟一段时间后重新创建线程
-        QTimer.singleShot(1500, self.recreate_search_hotkey_thread)
+        # 使用指数退避算法，延迟时间逐渐增加
+        delay = min(3000 * (2 ** self.search_hotkey_restart_count), 30000)  # 最多延迟30秒
+        QTimer.singleShot(delay, self.recreate_search_hotkey_thread)
 
     def recreate_search_hotkey_thread(self):
         """重新创建搜索热键线程"""
