@@ -1851,6 +1851,8 @@ class ClipboardHistoryApp(QMainWindow):
                     original_text = item["text"] if isinstance(item, dict) else str(item)
                 # 复制到剪贴板
                 self.clipboard.setText(original_text)
+                # 复制成功后隐藏窗口，回退到系统托盘
+                self.hide()
         # 修改为 Alt+C 快捷键
         elif (event.modifiers() == Qt.KeyboardModifier.AltModifier and 
               event.key() == Qt.Key.Key_C and 
