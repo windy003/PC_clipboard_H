@@ -1417,7 +1417,7 @@ class ClipboardHistoryApp(QMainWindow):
         
         # 创建并启动热键线程
         self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+windows+a'))
-        self.hotkey_thread.triggered.connect(self.show_window)
+        self.hotkey_thread.triggered.connect(self.toggle_window)
         self.hotkey_thread.error.connect(self.handle_hotkey_error)  # 连接错误处理
         self.hotkey_thread.start()
         
@@ -1522,7 +1522,7 @@ class ClipboardHistoryApp(QMainWindow):
         """创建新的主热键线程"""
         try:
             self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+windows+a'))
-            self.hotkey_thread.triggered.connect(self.show_window)
+            self.hotkey_thread.triggered.connect(self.toggle_window)
             self.hotkey_thread.error.connect(self.handle_hotkey_error)
             self.hotkey_thread.start()
             print("新的主热键线程已创建")
@@ -2015,6 +2015,15 @@ class ClipboardHistoryApp(QMainWindow):
             self.hide()
             QTimer.singleShot(100, lambda: keyboard.send('ctrl+v'))
 
+    def toggle_window(self):
+        """切换窗口显示/隐藏状态"""
+        if self.isVisible() and self.isActiveWindow():
+            print("窗口当前可见且活跃，将隐藏")
+            self.hide()
+        else:
+            print("窗口当前隐藏或不活跃，将显示")
+            self.show_window()
+
     def show_window(self):
         """显示窗口"""
         print("正在显示窗口")  # 调试信息
@@ -2286,7 +2295,7 @@ class ClipboardHistoryApp(QMainWindow):
                 self.hotkey_thread.stop()
                 self.hotkey_thread.wait()
                 self.hotkey_thread = HotkeyThread(new_hotkey)
-                self.hotkey_thread.triggered.connect(self.show_window)
+                self.hotkey_thread.triggered.connect(self.toggle_window)
                 self.hotkey_thread.start()
                 QMessageBox.information(self, "设置成功", f"快捷键已更改为: {new_hotkey}")
 
@@ -2579,7 +2588,7 @@ class ClipboardHistoryApp(QMainWindow):
         try:
             # 创建新的热键线程
             self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+windows+a'))
-            self.hotkey_thread.triggered.connect(self.show_window)
+            self.hotkey_thread.triggered.connect(self.toggle_window)
             self.hotkey_thread.error.connect(self.handle_hotkey_error)
             self.hotkey_thread.start()
             
@@ -2929,10 +2938,10 @@ class ClipboardHistoryApp(QMainWindow):
         """重新创建所有热键线程"""
         try:
             print("重新创建所有热键线程...")
-            
+
             # 创建主热键线程
             self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+windows+a'))
-            self.hotkey_thread.triggered.connect(self.show_window)
+            self.hotkey_thread.triggered.connect(self.toggle_window)
             self.hotkey_thread.error.connect(self.handle_hotkey_error)
             self.hotkey_thread.start()
             
