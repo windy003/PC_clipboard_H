@@ -1,3 +1,3 @@
 
-cd /d "D:\files\using\PC_clipboard_H"  && start  /B  pythonw clipboard_sync.py
+start  /B  pythonw "D:\files\using\Python\PC_clipboard_H\clipboard_sync.py"
 
