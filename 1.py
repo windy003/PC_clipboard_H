@@ -553,11 +553,11 @@ class PreviewWindow(QWidget):
         )
     
     def set_content(self, text, description=""):
-        self.text_edit.setText(text)
+        self.text_edit.setPlainText(text)
         if description:
             self.description_label.show()
             self.description_edit.show()
-            self.description_edit.setText(description)
+            self.description_edit.setPlainText(description)
             self.separator.show()
         else:
             self.description_label.hide()
