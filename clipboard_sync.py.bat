@@ -1,3 +1,3 @@
 
-start  /B  pythonw "D:\files\using\Python\PC_clipboard_H\clipboard_sync.py"
+start  /B  pythonw ./x13-gen2-clipboard_sync.py
 
