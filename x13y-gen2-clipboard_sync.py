@@ -27,7 +27,7 @@ source_path = os.path.join(os.path.expanduser("~"), ".clipboard_favorites.json")
 
     
 # 目标路径
-destination_path = 'gdrive:/sync/x1c-gen8/pc_clipboard_sync/'
+destination_path = 'gdrive:/sync/x13y-gen2/pc_clipboard_sync/'
 
 def sync_clipboard_to_gdrive():
     """
