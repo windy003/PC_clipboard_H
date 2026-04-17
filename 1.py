@@ -1386,7 +1386,7 @@ class ClipboardHistoryApp(QMainWindow):
         top_layout.addLayout(folder_layout)
         
         # 存储收藏夹数据
-        self.favorites_file = os.path.join(os.path.expanduser('~'), '.clipboard_favorites.json')
+        self.favorites_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.clipboard_favorites.json')
         
         # 加载收藏记录
         self.load_favorites()
@@ -1406,13 +1406,13 @@ class ClipboardHistoryApp(QMainWindow):
         self.last_text = self.clipboard.text()
         
         # 设置保存文件的路径
-        self.history_file = os.path.join(os.path.expanduser('~'), '.clipboard_history.json')
+        self.history_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.clipboard_history.json')
         
         # 加载历史记录
         self.load_history()
         
         # 加载配置
-        self.config_file = os.path.join(os.path.expanduser('~'), '.clipboard_config.json')
+        self.config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.clipboard_config.json')
         self.load_config()
         
         # 创建并启动热键线程
