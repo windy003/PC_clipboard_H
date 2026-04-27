@@ -477,22 +477,22 @@ class PreviewWindow(QWidget):
         # 创建标题栏布局（包含关闭按钮）
         title_layout = QHBoxLayout()
         title_layout.setContentsMargins(0, 0, 0, 0)
-        
+
         # 标题标签
         title_label = QLabel("预览窗口")
         title_label.setStyleSheet("font-weight: bold; color: #333; font-size: 14px;")
         title_layout.addWidget(title_label)
-        
+
         # 弹性空间
         title_layout.addStretch()
-        
+
         # 关闭按钮
         self.close_button = QPushButton("×")
         self.close_button.setObjectName("close_button")
         self.close_button.setToolTip("关闭预览窗口 (Esc)")
         self.close_button.clicked.connect(self.hide)
         title_layout.addWidget(self.close_button)
-        
+
         main_layout.addLayout(title_layout)
         
         # 创建一个滚动区域
@@ -571,17 +571,6 @@ class PreviewWindow(QWidget):
         else:
             super().keyPressEvent(event)
     
-    def mousePressEvent(self, event):
-        """处理鼠标按下事件，用于拖拽窗口"""
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.drag_position = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
-            event.accept()
-    
-    def mouseMoveEvent(self, event):
-        """处理鼠标移动事件，实现窗口拖拽"""
-        if event.buttons() == Qt.MouseButton.LeftButton and hasattr(self, 'drag_position'):
-            self.move(event.globalPosition().toPoint() - self.drag_position)
-            event.accept()
     
     def focusOutEvent(self, event):
         """当窗口失去焦点时的处理"""
@@ -2960,13 +2949,7 @@ class ClipboardHistoryApp(QMainWindow):
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径"""
-    try:
-        # PyInstaller创建临时文件夹,将路径存储在_MEIPASS中
-        base_path = sys._MEIPASS
-    except Exception:
-        # 如果不是打包的情况,就使用当前文件的路径
-        base_path = os.path.dirname(__file__)
-    
+    base_path = os.path.dirname(__file__)
     return os.path.join(base_path, relative_path)
 
 def main():
