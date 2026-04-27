@@ -2772,12 +2772,18 @@ class ClipboardHistoryApp(QMainWindow):
                 self.save_history()
 
     def show_search_dialog(self):
-        """显示搜索对话框"""
-        dialog = SearchDialog(self)
-        # 设置对话框属性，确保它能获得输入焦点
-        dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        dialog.setModal(True)
-        dialog.exec()
+        """显示/关闭搜索对话框（toggle）"""
+        # 如果搜索对话框已存在且可见，则关闭它
+        if hasattr(self, '_search_dialog') and self._search_dialog is not None and self._search_dialog.isVisible():
+            self._search_dialog.close()
+            self._search_dialog = None
+            return
+        # 创建新的搜索对话框
+        self._search_dialog = SearchDialog(self)
+        self._search_dialog.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        self._search_dialog.setModal(True)
+        self._search_dialog.destroyed.connect(lambda: setattr(self, '_search_dialog', None))
+        self._search_dialog.exec()
     
     def search_items(self, search_text, use_regex, scope, case_sensitive=False, whole_word=False):
         """搜索项目"""
