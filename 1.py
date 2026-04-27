@@ -572,11 +572,6 @@ class PreviewWindow(QWidget):
             super().keyPressEvent(event)
     
     
-    def focusOutEvent(self, event):
-        """当窗口失去焦点时的处理"""
-        # 可以选择在失去焦点时隐藏窗口，但这可能会影响用户体验
-        # 所以这里暂时不自动隐藏
-        super().focusOutEvent(event)
 
 class EditItemDialog(QDialog):
     """编辑条目对话框"""
