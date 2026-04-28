@@ -245,7 +245,7 @@ class DescriptionDialog(QDialog):
     def __init__(self, parent=None, text="", description=""):
         super().__init__(parent)
         self.setWindowTitle("编辑内容和描述")
-        self.resize(800, 600)  # 增加窗口尺寸
+        self.resize(900, 600)  # 增加窗口尺寸
         
         layout = QVBoxLayout(self)
         
@@ -1197,12 +1197,6 @@ class ClipboardHistoryApp(QMainWindow):
         hint_label.setStyleSheet("color: gray;")  # 使提示文字颜色变淡
         top_layout.addWidget(hint_label)
         
-        # 添加搜索按钮
-        self.search_button = QPushButton("搜索(&S)")  # 添加快捷键 Alt+S
-        self.search_button.setFixedWidth(60)
-        self.search_button.clicked.connect(self.show_panel_search)
-        top_layout.addWidget(self.search_button)
-        
         top_layout.addStretch()  # 添加弹性空间，使标签靠左对齐
         
         # 创建堆叠式窗口部件
@@ -1306,9 +1300,9 @@ class ClipboardHistoryApp(QMainWindow):
         self.rename_folder_btn.setFixedWidth(60)
         
         # 删除按钮
-        self.delete_folder_btn = QPushButton("删除(&D)")
+        self.delete_folder_btn = QPushButton("删除收藏文件夹(&D)")
         self.delete_folder_btn.clicked.connect(self.delete_current_folder)
-        self.delete_folder_btn.setFixedWidth(60)
+        self.delete_folder_btn.setFixedWidth(110)
         
         # 按新顺序添加按钮
         folder_layout.addWidget(self.change_folder_btn)
@@ -2672,19 +2666,6 @@ class ClipboardHistoryApp(QMainWindow):
             expected_range_end = expected_range_start + 9
             return expected_range_start <= number <= expected_range_end
 
-    def show_panel_search(self):
-        """显示当前面板的搜索对话框"""
-        dialog = SearchDialog(self)
-        # 根据当前面板设置搜索范围
-        if self.stacked_widget.currentIndex() == 0:
-            # 历史记录面板
-            dialog._set_scope("历史记录")
-        else:
-            # 收藏面板
-            dialog._set_scope("当前收藏夹")
-        dialog.perform_search()  # 立即执行一次搜索
-        dialog.search_input.setFocus()  # 设置焦点到搜索框
-        dialog.exec()
 
     def delete_history_item(self):
         """删除选中的历史条目"""
