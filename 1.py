@@ -660,17 +660,28 @@ class SearchDialog(QDialog):
         # 搜索范围选项 - Alt+X
         scope_layout = QHBoxLayout()
         scope_layout.addWidget(QLabel("搜索范围:"))
-        
+
+        # 隐藏的combo用于存储当前选中的范围值
         self.scope_combo = QComboBox()
         self.scope_combo.addItems(["全部", "历史记录", "当前收藏夹", "所有收藏夹"])
         self.scope_combo.currentIndexChanged.connect(self.on_search_option_changed)
-        scope_layout.addWidget(self.scope_combo)
-        
-        # 设置快捷键 Alt+X 显示下拉菜单
-        self.scope_button = QPushButton("选择范围(&X)")
-        self.scope_button.clicked.connect(self.show_scope_menu)
-        scope_layout.addWidget(self.scope_button)
-        
+        self.scope_combo.hide()
+
+        # 下拉菜单按钮
+        self.scope_menu_button = QPushButton("全部(&X)")
+        scope_menu = QMenu(self)
+        for scope in ["全部", "历史记录", "当前收藏夹", "所有收藏夹"]:
+            action = scope_menu.addAction(scope)
+            action.triggered.connect(lambda checked, s=scope: self._set_scope(s))
+        # 指定收藏夹 - 子菜单
+        if hasattr(self.parent_app, 'favorites') and self.parent_app.favorites:
+            submenu = scope_menu.addMenu("指定收藏夹")
+            for folder_name in sorted(self.parent_app.favorites.keys()):
+                action = submenu.addAction(folder_name)
+                action.triggered.connect(lambda checked, fn=folder_name: self._set_folder_scope(fn))
+        self.scope_menu_button.setMenu(scope_menu)
+        scope_layout.addWidget(self.scope_menu_button)
+
         layout.addLayout(scope_layout)
         
         # 创建水平分割布局
@@ -738,70 +749,26 @@ class SearchDialog(QDialog):
         """延迟设置焦点"""
         self.search_input.setFocus()
         self.search_input.selectAll()  # 选中所有文本（如果有的话）
-    
-    def show_scope_menu(self):
-        """显示搜索范围下拉菜单"""
-        # 创建菜单
-        menu = QMenu(self)
-        
-        # 添加基本搜索范围选项
-        basic_scopes = ["全部", "历史记录", "当前收藏夹", "所有收藏夹"]
-        for i, scope in enumerate(basic_scopes):
-            action = menu.addAction(scope)
-            # 标记当前选中的范围
-            if i == self.scope_combo.currentIndex() and self.scope_combo.currentText() == scope:
-                action.setIcon(QIcon.fromTheme("dialog-ok"))
-            
-            # 修复闭包问题：使用偏函数或默认参数来正确捕获变量值
-            def make_scope_handler(scope_name, index):
-                return lambda checked: self.set_search_scope(scope_name, index)
-            
-            # 连接动作信号
-            action.triggered.connect(make_scope_handler(scope, i))
-        
-        # 添加分隔线
-        menu.addSeparator()
-        
-        # 添加子收藏夹选项
-        if hasattr(self.parent_app, 'favorites') and self.parent_app.favorites:
-            submenu = menu.addMenu("指定收藏夹")
-            for folder_name in sorted(self.parent_app.favorites.keys()):
-                action = submenu.addAction(folder_name)
-                # 标记当前选中的收藏夹
-                if self.scope_combo.currentText() == f"收藏夹-{folder_name}":
-                    action.setIcon(QIcon.fromTheme("dialog-ok"))
-                
-                # 修复闭包问题：使用偏函数或默认参数来正确捕获变量值
-                def make_folder_handler(folder):
-                    return lambda checked: self.set_folder_scope(folder)
-                
-                # 连接动作信号
-                action.triggered.connect(make_folder_handler(folder_name))
-        
-        # 在按钮下方显示菜单
-        button_pos = self.scope_button.mapToGlobal(QPoint(0, self.scope_button.height()))
-        menu.exec(button_pos)
-    
-    def set_search_scope(self, scope, index):
-        """设置搜索范围"""
-        self.scope_combo.setCurrentIndex(index)
+
+    def _set_scope(self, scope_name):
+        """设置搜索范围（基本选项）"""
+        index = self.scope_combo.findText(scope_name)
+        if index != -1:
+            self.scope_combo.setCurrentIndex(index)
+        self.scope_menu_button.setText(f"{scope_name}(&X)")
         self.perform_search()
 
-    def set_folder_scope(self, folder_name):
+    def _set_folder_scope(self, folder_name):
         """设置特定收藏夹作为搜索范围"""
-        # 修改搜索范围的格式，使其与 search_items 方法中的判断一致
-        folder_scope = f"收藏夹-{folder_name}"  # 修改这里，使用连字符而不是冒号
+        folder_scope = f"收藏夹-{folder_name}"
         index = self.scope_combo.findText(folder_scope)
-        
         if index == -1:
-            # 如果不存在，添加新选项
             self.scope_combo.addItem(folder_scope)
             index = self.scope_combo.count() - 1
-        
-        # 设置为当前选项
         self.scope_combo.setCurrentIndex(index)
+        self.scope_menu_button.setText(f"{folder_scope}(&X)")
         self.perform_search()
-
+    
 
     def show_results_context_menu(self, position):
         """显示搜索结果的右键菜单"""
@@ -2731,10 +2698,10 @@ class ClipboardHistoryApp(QMainWindow):
         # 根据当前面板设置搜索范围
         if self.stacked_widget.currentIndex() == 0:
             # 历史记录面板
-            dialog.scope_combo.setCurrentText("历史记录")
+            dialog._set_scope("历史记录")
         else:
             # 收藏面板
-            dialog.scope_combo.setCurrentText("当前收藏夹")
+            dialog._set_scope("当前收藏夹")
         dialog.perform_search()  # 立即执行一次搜索
         dialog.search_input.setFocus()  # 设置焦点到搜索框
         dialog.exec()
