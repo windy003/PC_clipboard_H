@@ -886,12 +886,7 @@ class SearchDialog(QDialog):
                             parent.save_history()
                             break
                 
-                # 显示状态信息
-                if hasattr(parent, 'statusBar'):
-                    parent.statusBar().showMessage(f"已从{source}中删除项目", 3000)
-                else:
-                    # 如果没有状态栏，可以在控制台打印信息
-                    print(f"已从{source}中删除项目")
+                print(f"已从{source}中删除项目")
 
     def edit_selected_item(self):
         """编辑选中的搜索结果项"""
