@@ -698,21 +698,6 @@ class SearchDialog(QDialog):
         
         layout.addLayout(split_layout)
         
-        # 按钮布局
-        button_layout = QHBoxLayout()
-        
-        # 使用选中项按钮
-        self.use_button = QPushButton("使用选中项")
-        self.use_button.clicked.connect(self.use_selected)
-        button_layout.addWidget(self.use_button)
-        
-        # 关闭按钮
-        self.close_button = QPushButton("关闭")
-        self.close_button.clicked.connect(self.reject)
-        button_layout.addWidget(self.close_button)
-        
-        layout.addLayout(button_layout)
-        
         # 存储搜索结果
         self.results = []  # 确保初始化 results 列表
         
