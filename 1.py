@@ -796,8 +796,8 @@ class SearchDialog(QDialog):
     def move_to_folder_from_results(self, index, target_folder):
         """将搜索结果中的条目移动到指定收藏夹"""
         if 0 <= index < len(self.results):
-            source, text, description = self.results[index]
-            
+            source, text, description = (*self.results[index], "", "", "")[:3]
+
             # 确保目标收藏夹存在
             if target_folder not in self.parent_app.favorites:
                 self.parent_app.favorites[target_folder] = []
