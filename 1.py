@@ -1265,11 +1265,6 @@ class ClipboardHistoryApp(QMainWindow):
         button_layout = QHBoxLayout()
         layout.addLayout(button_layout)
         
-        # 创建"复制选中项"按钮
-        copy_button = QPushButton("复制选中项")
-        copy_button.clicked.connect(self.copy_selected)
-        button_layout.addWidget(copy_button)
-        
         # 清空历史按钮
         clear_button = QPushButton("清空历史")
         clear_button.clicked.connect(self.clear_history)
