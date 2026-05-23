@@ -1174,10 +1174,8 @@ class ClipboardHistoryApp(QMainWindow):
         super().__init__()
         self.setWindowTitle("剪贴板历史")
         
-        # 设置窗口图标
-        icon_path = get_resource_path("icon.ico")
-        if os.path.exists(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
+        # 设置窗口图标 (任务栏会显示此图标)
+        self.setWindowIcon(get_app_icon())
         
         # 创建主窗口部件
         central_widget = QWidget()
@@ -1621,10 +1619,10 @@ class ClipboardHistoryApp(QMainWindow):
         """创建系统托盘图标"""
         self.tray_icon = QSystemTrayIcon(self)
         
-        # 使用资源路径获取图标
-        icon_path = get_resource_path("icon.ico")
-        if os.path.exists(icon_path):
-            self.tray_icon.setIcon(QIcon(icon_path))
+        # 使用资源路径获取图标 (icon.ico 优先, 回退到 icon.png)
+        icon = get_app_icon()
+        if not icon.isNull():
+            self.tray_icon.setIcon(icon)
         else:
             # 如果找不到图标文件，使用默认图标
             self.tray_icon.setIcon(self.create_default_icon())
@@ -2876,14 +2874,37 @@ def get_resource_path(relative_path):
     base_path = os.path.dirname(__file__)
     return os.path.join(base_path, relative_path)
 
+def get_app_icon():
+    """优先使用 icon.ico, 回退到 icon.png"""
+    for name in ("icon.ico", "icon.png"):
+        path = get_resource_path(name)
+        if os.path.exists(path):
+            return QIcon(path)
+    return QIcon()
+
 def main():
+    # 在 Windows 上设置 AppUserModelID, 让任务栏把本应用识别为独立应用,
+    # 否则会沿用 python.exe 的图标
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "PCClipboardH.ClipboardHistory.1"
+            )
+        except Exception as e:
+            print(f"设置 AppUserModelID 失败: {e}")
+
     app = QApplication(sys.argv)
+
+    # 设置应用级图标, 任务栏会使用这个图标
+    app.setWindowIcon(get_app_icon())
+
     window = ClipboardHistoryApp()
     window.hide()  # 初始隐藏窗口
-    
+
     # 阻止 Python 解释器退出
     app.setQuitOnLastWindowClosed(False)
-    
+
     sys.exit(app.exec())
 
 if __name__ == '__main__':
