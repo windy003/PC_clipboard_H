@@ -1,8 +1,9 @@
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidget, 
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidget,
                            QVBoxLayout, QPushButton, QWidget, QSystemTrayIcon, QMenu,
-                           QHBoxLayout, QStackedWidget, QLabel, QTextEdit, QDialog, QLineEdit, QMessageBox, QComboBox, QInputDialog, QFrame, QScrollArea, QCheckBox)
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QPoint
-from PyQt6.QtGui import QClipboard, QIcon, QKeyEvent, QKeySequence, QShortcut
+                           QHBoxLayout, QStackedWidget, QLabel, QTextEdit, QDialog, QLineEdit, QMessageBox, QComboBox, QInputDialog, QFrame, QScrollArea, QCheckBox,
+                           QStyledItemDelegate, QStyle, QStyleOptionViewItem, QListView)
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QPoint, QRect, QSize
+from PyQt6.QtGui import QClipboard, QIcon, QKeyEvent, QKeySequence, QShortcut, QColor, QPen, QPalette
 import sys
 import json
 import os
@@ -1169,6 +1170,156 @@ class SearchDialog(QDialog):
     
 
 
+class FullWidthListWidget(QListWidget):
+    """条目始终占满视口宽度的列表。
+
+    QListWidget 默认按内容宽度排布条目，且在窗口显示/缩放后不会主动重新向
+    delegate 查询 sizeHint，导致 delegate 返回的“视口宽度”无法生效（本程序
+    窗口初始 hide() 且列表位于 QStackedWidget 中，初次布局时视口宽度还不正
+    确）。这里直接给每个 QListWidgetItem 设置宽度——条目自身 sizeHint 的宽度
+    一定会被视图采纳，最为可靠——并在显示/缩放/新增条目时刷新。
+    """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # 新增条目后，把新行也撑满宽度
+        self.model().rowsInserted.connect(self._on_rows_inserted)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._stretch_all()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._stretch_all()
+
+    def _row_height(self, item):
+        h = item.sizeHint().height()
+        return h if h > 0 else 28
+
+    def _stretch_all(self):
+        w = self.viewport().width()
+        if w <= 0:
+            return
+        for i in range(self.count()):
+            item = self.item(i)
+            if item is not None and item.sizeHint().width() != w:
+                item.setSizeHint(QSize(w, self._row_height(item)))
+
+    def _on_rows_inserted(self, parent, first, last):
+        w = self.viewport().width()
+        if w <= 0:
+            return
+        for i in range(first, last + 1):
+            item = self.item(i)
+            if item is not None:
+                item.setSizeHint(QSize(w, self._row_height(item)))
+
+
+class ListItemDelegate(QStyledItemDelegate):
+    """列表项代理：
+    - show_description=True：左半边显示内容，右半边显示描述（收藏面板）
+    - show_description=False：内容占满整行宽度（历史记录面板）
+    """
+    def __init__(self, app, parent=None, show_description=True):
+        super().__init__(parent)
+        self.app = app  # 主窗口引用，用于按行号读取描述
+        self.show_description = show_description
+
+    def _get_description(self, row):
+        """按行号从当前收藏夹数据中读取描述"""
+        try:
+            items = self.app.favorites.get(self.app.current_folder, [])
+            if 0 <= row < len(items):
+                item = items[row]
+                if isinstance(item, dict):
+                    desc = item.get("description", "") or ""
+                    return desc.replace('\n', ' ').replace('\r', '')
+        except Exception:
+            pass
+        return ""
+
+    def paint(self, painter, option, index):
+        painter.save()
+
+        # 用基类样式绘制背景（含选中/悬停效果），但清空文本由我们自己绘制
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.text = ""
+        widget = opt.widget
+        style = widget.style() if widget else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, opt, painter, widget)
+
+        rect = option.rect
+        padding = 6
+
+        # 文字颜色与列表样式表保持一致（选中背景为浅蓝 #e3f2fd）
+        selected = bool(opt.state & QStyle.StateFlag.State_Selected)
+        if selected:
+            text_color = QColor("#1976d2")
+            desc_color = QColor("#1976d2")
+        else:
+            text_color = QColor("#212121")
+            desc_color = QColor("#666666")
+
+        fm = painter.fontMetrics()
+        content = index.data(Qt.ItemDataRole.DisplayRole) or ""
+
+        if not self.show_description:
+            # 历史记录：内容占满整行宽度
+            full_rect = QRect(rect.left() + padding, rect.top(),
+                              rect.width() - padding * 2, rect.height())
+            elided_content = fm.elidedText(content, Qt.TextElideMode.ElideRight, full_rect.width())
+            painter.setPen(text_color)
+            painter.drawText(full_rect,
+                             int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
+                             elided_content)
+            painter.restore()
+            return
+
+        # 收藏面板：左半边内容，右半边描述
+        mid = rect.left() + rect.width() // 2
+
+        # 左半边：内容（DisplayRole 已包含编号前缀）
+        left_rect = QRect(rect.left() + padding, rect.top(),
+                          mid - rect.left() - padding * 2, rect.height())
+        elided_content = fm.elidedText(content, Qt.TextElideMode.ElideRight, left_rect.width())
+        painter.setPen(text_color)
+        painter.drawText(left_rect,
+                         int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
+                         elided_content)
+
+        # 中间分隔线
+        painter.setPen(QPen(QColor("#d0d0d0")))
+        painter.drawLine(mid, rect.top() + 4, mid, rect.bottom() - 4)
+
+        # 右半边：描述
+        description = self._get_description(index.row())
+        right_rect = QRect(mid + padding, rect.top(),
+                           rect.right() - mid - padding * 2, rect.height())
+        elided_desc = fm.elidedText(description, Qt.TextElideMode.ElideRight, right_rect.width())
+        painter.setPen(desc_color)
+        painter.drawText(right_rect,
+                         int(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft),
+                         elided_desc)
+
+        painter.restore()
+
+    def sizeHint(self, option, index):
+        size = super().sizeHint(option, index)
+        if size.height() < 28:
+            size.setHeight(28)
+        # 让条目占满列表视口宽度（QListWidget 默认只用文本宽度作为条目宽度）
+        view = self.parent()
+        if view is not None:
+            try:
+                vw = view.viewport().width()
+                if vw > 0:
+                    size.setWidth(vw)
+            except Exception:
+                pass
+        return size
+
+
 class ClipboardHistoryApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1202,7 +1353,7 @@ class ClipboardHistoryApp(QMainWindow):
         layout.addWidget(self.stacked_widget)
         
         # 创建历史记录列表
-        self.history_list = QListWidget()
+        self.history_list = FullWidthListWidget()
         self.history_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.history_list.customContextMenuRequested.connect(self.show_history_context_menu)
         self.history_list.keyPressEvent = self.list_key_press
@@ -1225,10 +1376,13 @@ class ClipboardHistoryApp(QMainWindow):
                 background-color: #f5f5f5;
             }
         """)
+        # 使用自定义代理：内容占满整行宽度（无描述列）
+        self.history_list.setItemDelegate(ListItemDelegate(self, self.history_list, show_description=False))
+        self.history_list.setResizeMode(QListView.ResizeMode.Adjust)  # 视口变化时重新布局，使条目宽度跟随
         self.stacked_widget.addWidget(self.history_list)
-        
+
         # 创建收藏列表
-        self.favorites_list = QListWidget()
+        self.favorites_list = FullWidthListWidget()
         self.favorites_list.keyPressEvent = self.list_key_press
         self.favorites_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
         self.favorites_list.setDefaultDropAction(Qt.DropAction.MoveAction)
@@ -1253,6 +1407,9 @@ class ClipboardHistoryApp(QMainWindow):
             }
         """)
         self.favorites_list.model().rowsMoved.connect(self.on_favorites_reordered)  # 连接重排序信号
+        # 使用自定义代理：左半边显示内容，右半边显示描述
+        self.favorites_list.setItemDelegate(ListItemDelegate(self, self.favorites_list, show_description=True))
+        self.favorites_list.setResizeMode(QListView.ResizeMode.Adjust)  # 视口变化时重新布局，使条目宽度跟随
         self.stacked_widget.addWidget(self.favorites_list)
         
         # 为收藏列表添加右键菜单
@@ -2172,14 +2329,13 @@ class ClipboardHistoryApp(QMainWindow):
             traceback.print_exc()
 
     def truncate_text(self, text, max_length=50):
-        """截断文本，保留定长度添加省略号"""
-        # 移除文本中的换行符
-        text = text.replace('\n', ' ').replace('\r', '')
-        
-        # 确保不会特殊处理以find开头的文本
-        if len(text) > max_length:
-            return text[:max_length] + "..."
-        return text
+        """规整列表显示文本：仅去除换行符，不再按固定字符数截断。
+
+        历史/收藏两个列表都使用 ListItemDelegate，由其 elidedText 按视口
+        宽度自动省略（溢出时加“…”），因此这里返回整行文本，条目即可占满
+        宽度并尽量多显示内容。max_length 参数仅为兼容旧调用，已不再使用。
+        """
+        return text.replace('\n', ' ').replace('\r', '')
 
 
     def hide(self):
