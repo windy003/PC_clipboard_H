@@ -1,1 +1,0 @@
-cd D:\files\using\Python\PC_clipboard_H  &&  start /b pythonw sync_favorites.py
