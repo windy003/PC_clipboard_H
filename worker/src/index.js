@@ -214,13 +214,14 @@ async function loadFavorites(db, userId, folderName = null) {
     favorites[folderName] = [];
     const itemRes = await db
       .prepare(
-        "SELECT text, description FROM favorites WHERE user_id = ? AND folder = ? " +
+        "SELECT id, text, description FROM favorites WHERE user_id = ? AND folder = ? " +
           "ORDER BY position ASC"
       )
       .bind(userId, folderName)
       .all();
     for (const row of itemRes.results || []) {
       favorites[folderName].push({
+        id: row.id,
         text: row.text || "",
         description: row.description || "",
       });
@@ -239,7 +240,7 @@ async function loadFavorites(db, userId, folderName = null) {
 
   const itemRes = await db
     .prepare(
-      "SELECT folder, text, description FROM favorites WHERE user_id = ? " +
+      "SELECT id, folder, text, description FROM favorites WHERE user_id = ? " +
         "ORDER BY folder ASC, position ASC"
     )
     .bind(userId)
@@ -247,11 +248,21 @@ async function loadFavorites(db, userId, folderName = null) {
   for (const row of itemRes.results || []) {
     if (!favorites[row.folder]) favorites[row.folder] = [];
     favorites[row.folder].push({
+      id: row.id,
       text: row.text || "",
       description: row.description || "",
     });
   }
   return favorites;
+}
+
+/** 删除当前账号的一条收藏（按条目 id）。 */
+async function deleteItem(db, userId, id) {
+  await ensureSchema(db);
+  await db
+    .prepare("DELETE FROM favorites WHERE user_id = ? AND id = ?")
+    .bind(userId, id)
+    .run();
 }
 
 /** 列出所有收藏夹名及各自的条目数（轻量，用于客户端做切换）。 */
@@ -410,6 +421,16 @@ export default {
           return json({ ok: false, error: "Missing 'favorites' object" }, 400);
         }
         await saveFavorites(env.DB, userId, favorites);
+        return json({ ok: true });
+      }
+
+      if (url.pathname === "/delete") {
+        const body = await readJsonBody(request);
+        const id = body && Number.isInteger(body.id) ? body.id : null;
+        if (id == null) {
+          return json({ ok: false, error: "缺少条目 id" }, 400);
+        }
+        await deleteItem(env.DB, userId, id);
         return json({ ok: true });
       }
 

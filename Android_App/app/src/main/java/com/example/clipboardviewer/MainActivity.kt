@@ -6,6 +6,7 @@ import android.view.View
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -17,7 +18,7 @@ import kotlinx.coroutines.withContext
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
-    private val adapter = FavAdapter()
+    private val adapter = FavAdapter { item -> confirmDelete(item) }
 
     private val prefs by lazy { getSharedPreferences(PREFS, Context.MODE_PRIVATE) }
 
@@ -26,8 +27,8 @@ class MainActivity : AppCompatActivity() {
 
     // 下拉每一项对应的收藏夹名；null 表示「全部」。与 spinner 选项一一对应。
     private var folderKeys: List<String?> = listOf(null)
-    private var currentFolder: String? = null   // 当前查看的收藏夹，null=全部
-    private var suppressSpinner = false          // 防止程序性设置 spinner 触发回调
+    private var currentFolder: String? = DEFAULT_FOLDER   // 默认打开「记忆」收藏夹
+    private var suppressSpinner = false                    // 防止程序性设置 spinner 触发回调
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -91,6 +92,7 @@ class MainActivity : AppCompatActivity() {
                     .putLong(KEY_EXP, exp)
                     .apply()
                 binding.passInput.setText("")
+                currentFolder = DEFAULT_FOLDER
                 showContent()
                 refresh()
             } catch (e: Exception) {
@@ -104,7 +106,7 @@ class MainActivity : AppCompatActivity() {
     private fun logout() {
         prefs.edit().remove(KEY_TOKEN).remove(KEY_EXP).apply()
         adapter.submit(emptyList())
-        currentFolder = null
+        currentFolder = DEFAULT_FOLDER
         showLogin()
     }
 
@@ -138,7 +140,7 @@ class MainActivity : AppCompatActivity() {
                 keys.add(0, null)
                 folderKeys = keys
 
-                // 当前选中的收藏夹若已不存在，回到「全部」
+                // 当前选中的收藏夹若已不存在（比如默认的「记忆」还没建），回到「全部」
                 if (currentFolder != null && currentFolder !in keys) currentFolder = null
                 val selectIdx = keys.indexOf(currentFolder).let { if (it >= 0) it else 0 }
 
@@ -195,6 +197,45 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // ---------- 删除条目 ----------
+    private fun confirmDelete(item: Row.Item) {
+        if (item.id <= 0) {
+            toast("该条目无法删除")
+            return
+        }
+        val preview = if (item.text.length > 100) item.text.substring(0, 100) + "…" else item.text
+        AlertDialog.Builder(this)
+            .setTitle("删除条目")
+            .setMessage(preview)
+            .setPositiveButton("删除") { _, _ -> doDelete(item.id) }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun doDelete(id: Int) {
+        val url = prefs.getString(KEY_URL, defaultUrl) ?: defaultUrl
+        val token = prefs.getString(KEY_TOKEN, "") ?: ""
+        setLoading(true)
+        lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO) { ClipboardApi.deleteItem(url, token, id) }
+            } catch (e: ApiException) {
+                setLoading(false)
+                if (e.code == 401) { toast("登录已过期，请重新登录"); logout() }
+                else showError("删除失败：${e.message}")
+                return@launch
+            } catch (e: Exception) {
+                setLoading(false)
+                showError("删除失败：${e.message}")
+                return@launch
+            }
+            toast("已删除")
+            // 刷新列表计数与当前内容（loadData 会负责关闭 loading）
+            loadFolders()
+            loadData()
+        }
+    }
+
     // ---------- 界面切换 ----------
     private fun showLogin() {
         binding.loginPanel.visibility = View.VISIBLE
@@ -230,5 +271,6 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_USER = "username"
         private const val KEY_TOKEN = "token"
         private const val KEY_EXP = "expires_at"
+        private const val DEFAULT_FOLDER = "记忆"   // 默认打开的收藏夹
     }
 }

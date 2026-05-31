@@ -4,8 +4,8 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
-/** 一条收藏。 */
-data class FavItem(val text: String, val description: String)
+/** 一条收藏。id 为云端主键，用于删除等操作。 */
+data class FavItem(val id: Int, val text: String, val description: String)
 
 /** 一个收藏夹及其条目。 */
 data class Folder(val name: String, val items: List<FavItem>)
@@ -17,7 +17,7 @@ data class FolderInfo(val name: String, val count: Int)
 class ApiException(message: String, val code: Int = 0) : Exception(message)
 
 /**
- * 访问 Cloudflare Worker 的最小客户端：登录换 token、查询收藏夹列表、拉取收藏夹内容。
+ * 访问 Cloudflare Worker 的最小客户端：登录、查询收藏夹列表、拉取内容、删除条目。
  * 只用 JDK 自带的 HttpURLConnection + org.json，无第三方网络依赖。
  *
  * 这些方法会阻塞网络，请在后台线程（Dispatchers.IO）调用。
@@ -92,10 +92,17 @@ object ClipboardApi {
             val items = mutableListOf<FavItem>()
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue
-                items.add(FavItem(o.optString("text", ""), o.optString("description", "")))
+                items.add(FavItem(o.optInt("id", 0), o.optString("text", ""), o.optString("description", "")))
             }
             folders.add(Folder(name, items))
         }
         return folders
+    }
+
+    /** 删除一条收藏（按条目 id）。失败抛 ApiException。 */
+    fun deleteItem(workerUrl: String, token: String, id: Int) {
+        val body = JSONObject().put("id", id).toString()
+        val json = post("${normalizeUrl(workerUrl)}/delete", body, token)
+        if (!json.optBoolean("ok")) throw ApiException(json.optString("error", "删除失败"))
     }
 }

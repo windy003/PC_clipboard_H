@@ -9,7 +9,7 @@ import androidx.recyclerview.widget.RecyclerView
 /** 列表行：收藏夹标题行 或 收藏条目行。 */
 sealed class Row {
     data class Header(val title: String) : Row()
-    data class Item(val text: String, val description: String) : Row()
+    data class Item(val id: Int, val text: String, val description: String) : Row()
 }
 
 /** 把收藏夹结构扁平化成带分组标题的行列表。 */
@@ -18,13 +18,18 @@ fun List<Folder>.toRows(): List<Row> {
     for (folder in this) {
         rows.add(Row.Header("${folder.name}  (${folder.items.size})"))
         for (item in folder.items) {
-            rows.add(Row.Item(item.text, item.description))
+            rows.add(Row.Item(item.id, item.text, item.description))
         }
     }
     return rows
 }
 
-class FavAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+/**
+ * @param onItemLongClick 长按某条目时回调（用于弹出删除等操作）。
+ */
+class FavAdapter(
+    private val onItemLongClick: (Row.Item) -> Unit
+) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private val rows = mutableListOf<Row>()
 
@@ -49,7 +54,13 @@ class FavAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         when (val row = rows[position]) {
             is Row.Header -> (holder as HeaderVH).bind(row)
-            is Row.Item -> (holder as ItemVH).bind(row)
+            is Row.Item -> {
+                (holder as ItemVH).bind(row)
+                holder.itemView.setOnLongClickListener {
+                    onItemLongClick(row)
+                    true
+                }
+            }
         }
     }
 
