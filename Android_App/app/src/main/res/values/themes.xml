@@ -1,0 +1,4 @@
+<resources>
+    <!-- 传统 View 用 Material3 主题（无 ActionBar，界面里自带顶部栏）。 -->
+    <style name="Theme.ClipboardViewer" parent="Theme.Material3.DayNight.NoActionBar" />
+</resources>

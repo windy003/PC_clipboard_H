@@ -1322,6 +1322,82 @@ class ListItemDelegate(QStyledItemDelegate):
         return size
 
 
+class LoginDialog(QDialog):
+    """云端账号登录对话框（提供注册密钥时也可注册新账号）。"""
+    def __init__(self, parent, storage, register_secret=""):
+        super().__init__(parent)
+        self.storage = storage
+        self.register_secret = register_secret or ""
+        self.setWindowTitle("登录云端同步")
+        self.setFixedWidth(320)
+
+        layout = QVBoxLayout(self)
+
+        layout.addWidget(QLabel("账号:"))
+        self.username_edit = QLineEdit()
+        self.username_edit.setText(storage.username or "")
+        layout.addWidget(self.username_edit)
+
+        layout.addWidget(QLabel("密码:"))
+        self.password_edit = QLineEdit()
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_edit.returnPressed.connect(self.do_login)
+        layout.addWidget(self.password_edit)
+
+        btn_layout = QHBoxLayout()
+        self.login_btn = QPushButton("登录(&L)")
+        self.login_btn.setDefault(True)
+        self.login_btn.clicked.connect(self.do_login)
+        btn_layout.addWidget(self.login_btn)
+
+        if self.register_secret:
+            self.register_btn = QPushButton("注册(&R)")
+            self.register_btn.clicked.connect(self.do_register)
+            btn_layout.addWidget(self.register_btn)
+
+        self.skip_btn = QPushButton("跳过(&S)")
+        self.skip_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(self.skip_btn)
+        layout.addLayout(btn_layout)
+
+        hint = "可登录或注册新账号；" if self.register_secret else ""
+        hint += "跳过则本次仅使用本地数据"
+        hint_label = QLabel(hint)
+        hint_label.setStyleSheet("color: gray; font-size: 12px;")
+        hint_label.setWordWrap(True)
+        layout.addWidget(hint_label)
+
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
+        self.username_edit.setFocus()
+
+    def _creds(self):
+        return self.username_edit.text().strip(), self.password_edit.text()
+
+    def do_login(self):
+        u, p = self._creds()
+        if not u or not p:
+            QMessageBox.warning(self, "提示", "请输入账号和密码")
+            return
+        try:
+            self.storage.login(u, p)
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "登录失败", str(e))
+
+    def do_register(self):
+        u, p = self._creds()
+        if not u or not p:
+            QMessageBox.warning(self, "提示", "请输入账号和密码")
+            return
+        try:
+            self.storage.register(u, p, self.register_secret)
+            self.storage.login(u, p)  # 注册成功后自动登录
+            QMessageBox.information(self, "注册成功", f"已注册并登录：{u}")
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "注册失败", str(e))
+
+
 class ClipboardHistoryApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1465,13 +1541,14 @@ class ClipboardHistoryApp(QMainWindow):
         # 存储收藏夹数据
         self.favorites_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.clipboard_favorites.json')
 
-        # 初始化 Cloudflare D1 存储（凭据从同目录 .env 或系统环境变量读取）
+        # 初始化云端收藏夹同步（经 Cloudflare Worker；配置从同目录 .env 或系统环境变量读取）
         load_env_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
         self.d1 = D1Storage.from_env()
         if self.d1.enabled:
-            print("已启用 Cloudflare D1 收藏夹同步")
+            print("已启用云端收藏夹同步（Worker）")
+            self._ensure_cloud_login()
         else:
-            print("未配置 Cloudflare D1，收藏夹仅保存在本地文件")
+            print("未配置 Worker，收藏夹仅保存在本地文件")
 
         # 加载收藏记录
         self.load_favorites()
@@ -2299,8 +2376,8 @@ class ClipboardHistoryApp(QMainWindow):
         优先从 Cloudflare D1 读取（作为数据源）；若 D1 为空但本地有数据，
         则把本地数据迁移上传到 D1；若 D1 未配置或不可用，则回退到本地文件。
         """
-        # 1) 尝试从 D1 读取
-        if self.d1.enabled:
+        # 1) 尝试从云端读取（需已登录）
+        if self.d1.enabled and self.d1.has_valid_token():
             try:
                 d1_favorites = self.d1.load()
                 if d1_favorites:
@@ -2352,15 +2429,31 @@ class ClipboardHistoryApp(QMainWindow):
         with open(self.favorites_file, 'w', encoding='utf-8') as f:
             json.dump(self.favorites, f, ensure_ascii=False, indent=2)
 
+    def _ensure_cloud_login(self):
+        """确保云端已登录：本地有未过期 token 则直接用，否则弹出登录框。
+
+        用户跳过登录时，本次运行回退为仅使用本地数据。
+        """
+        if self.d1.has_valid_token():
+            print(f"已使用本地登录凭据：{self.d1.username}")
+            return
+        register_secret = os.environ.get("CLIPBOARD_REGISTER_SECRET", "")
+        dialog = LoginDialog(self, self.d1, register_secret=register_secret)
+        dialog.exec()
+        if self.d1.has_valid_token():
+            print(f"已登录云端：{self.d1.username}")
+        else:
+            print("未登录，本次仅使用本地数据")
+
     def save_favorites(self):
-        """保存收藏记录：写入本地文件，并异步同步到 Cloudflare D1。"""
+        """保存收藏记录：写入本地文件，并异步同步到云端 Worker。"""
         try:
             # 1) 写入本地文件（快速、作为离线缓存与回退）
             self._write_favorites_file()
             print(f"收藏已保存到本地: {self.favorites_file}")
 
-            # 2) 异步推送到 D1（后台线程，不阻塞 UI）
-            if self.d1.enabled:
+            # 2) 异步推送到云端（后台线程，不阻塞 UI；需已登录）
+            if self.d1.enabled and self.d1.has_valid_token():
                 self.d1.save_async(self.favorites)
 
         except Exception as e:

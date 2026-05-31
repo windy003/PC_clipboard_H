@@ -1,0 +1,19 @@
+name = "clipboard-fav-worker"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+
+# 你的 Cloudflare 账号 ID（原 .env 里的 CLOUDFLARE_ACCOUNT_ID）。
+# 它不是密钥，单独无法访问账号，可放心提交。
+account_id = "6aed5098bacf3b03bf98ae6c97923e79"
+
+# D1 数据库绑定。
+# database_id 填你现有那个库的 ID（就是原来 .env 里的 CLOUDFLARE_D1_DATABASE_ID）。
+# database_name 填该库在 Cloudflare 后台显示的名字（用 `wrangler d1 list` 可查）。
+[[d1_databases]]
+binding = "DB"
+database_name = "my_clipboard_favorites"
+database_id = "6cfc6ce8-b4df-4fc8-87fb-e6321fcd3cb5"
+
+# 密钥不写在这里，用 secret 注入（见 worker/README.md）：
+#   wrangler secret put JWT_SECRET       # 给登录 token 签名
+#   wrangler secret put REGISTER_SECRET  # 开账号时要带的管理密钥

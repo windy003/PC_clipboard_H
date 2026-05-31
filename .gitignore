@@ -4,3 +4,8 @@ dist
 .clipboard_history.json
 .env
 .clipboard_favorites.json
+.clipboard_token.json
+worker/.dev.vars.example
+Android_App/app/build
+Android_App/.gradle
+Android_App/.idea

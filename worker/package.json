@@ -1,0 +1,13 @@
+{
+  "name": "clipboard-fav-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker：剪贴板收藏夹同步中转，隐藏 Cloudflare 凭据",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}

@@ -1,26 +1,30 @@
 # -*- coding: utf-8 -*-
-"""Cloudflare D1 数据库存储模块。
+"""收藏夹云端存储模块（账号 + 密码登录版，经由 Cloudflare Worker）。
 
-通过 Cloudflare D1 的 REST API 读写收藏夹数据（内容 text 与描述 description）。
+桌面端不存任何固定密钥：用户输入账号密码，向 Worker 的 /login 换取一个有
+时效的 JWT，之后用这个 token 访问 /load、/save。token 缓存在本地文件，过期
+或失效后需要重新登录。Cloudflare 的真实访问权限只在 Worker 端。
+
 仅使用标准库 urllib，无需额外依赖，便于 PyInstaller 打包。
 
 收藏数据结构（与主程序 self.favorites 一致）：
     { 收藏夹名: [ {"text": ..., "description": ...}, ... ], ... }
 
-使用两张表保存：
-    folders   —— 保存收藏夹名称及其顺序（同时保留空收藏夹）
-    favorites —— 保存每条收藏的内容、描述，以及在所属收藏夹内的顺序
+注：类名仍为 D1Storage，数据接口（enabled / load / save / save_async）保持不变，
+以便主程序的收藏夹读写逻辑无需改动；新增 login / register / token 管理。
 """
 
 import json
 import os
+import time
 import threading
 import urllib.request
 import urllib.error
 
 
-# Cloudflare D1 单条查询最多绑定 100 个参数，这里按列数换算每批最大行数
-_MAX_BOUND_PARAMS = 100
+class AuthError(Exception):
+    """未登录或 token 无效/已过期（HTTP 401）。"""
+    pass
 
 
 def load_env_file(path):
@@ -46,167 +50,170 @@ def load_env_file(path):
 
 
 class D1Storage:
-    """封装对 Cloudflare D1 收藏夹数据的读写。"""
+    """封装对收藏夹云端数据的读写（账号密码登录 + JWT，经由 Worker）。"""
 
-    _API_TEMPLATE = ("https://api.cloudflare.com/client/v4/accounts/"
-                     "{account_id}/d1/database/{database_id}/query")
-
-    def __init__(self, account_id, database_id, api_token, timeout=15):
-        self.account_id = (account_id or "").strip()
-        self.database_id = (database_id or "").strip()
-        self.api_token = (api_token or "").strip()
+    def __init__(self, worker_url, token_file=None, timeout=15):
+        # 去掉末尾斜杠，便于后续拼接 /login、/load、/save
+        self.worker_url = (worker_url or "").strip().rstrip("/")
         self.timeout = timeout
-        self._schema_ready = False
+        self.token_file = token_file or os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), '.clipboard_token.json')
+
+        self.token = ""
+        self.expires_at = 0      # JWT 过期的 unix 时间戳
+        self.username = ""
 
         # 后台异步保存所需：锁 + 待保存快照 + 工作线程
         self._lock = threading.Lock()
         self._pending = None
         self._worker = None
 
+        self._load_token()
+
     @property
     def enabled(self):
-        """三项凭据齐全时才启用 D1。"""
-        return bool(self.account_id and self.database_id and self.api_token)
+        """配置了 Worker 地址即视为启用云同步（是否登录是另一回事）。"""
+        return bool(self.worker_url)
 
     @classmethod
     def from_env(cls):
         """从环境变量创建实例。"""
-        return cls(
-            account_id=os.environ.get("CLOUDFLARE_ACCOUNT_ID", ""),
-            database_id=os.environ.get("CLOUDFLARE_D1_DATABASE_ID", ""),
-            api_token=os.environ.get("CLOUDFLARE_API_TOKEN", ""),
-        )
+        return cls(worker_url=os.environ.get("CLIPBOARD_WORKER_URL", ""))
+
+    # ---------- token 本地缓存 ----------
+    def _load_token(self):
+        """从本地文件读取上次登录的 token（仅当 Worker 地址匹配且未过期才采用）。"""
+        try:
+            if not os.path.exists(self.token_file):
+                return
+            with open(self.token_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            if data.get("worker_url") != self.worker_url:
+                return
+            self.token = data.get("token", "")
+            self.expires_at = data.get("expires_at", 0) or 0
+            self.username = data.get("username", "")
+        except Exception as e:
+            print(f"读取本地 token 出错: {e}")
+
+    def _save_token(self):
+        try:
+            with open(self.token_file, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "worker_url": self.worker_url,
+                    "username": self.username,
+                    "token": self.token,
+                    "expires_at": self.expires_at,
+                }, f, ensure_ascii=False)
+        except Exception as e:
+            print(f"保存本地 token 出错: {e}")
+
+    def has_valid_token(self):
+        """本地是否持有未过期的 token（留 60 秒余量）。"""
+        return bool(self.token) and time.time() < (self.expires_at - 60)
+
+    def logout(self):
+        """清除本地登录状态。"""
+        self.token = ""
+        self.expires_at = 0
+        self.username = ""
+        try:
+            if os.path.exists(self.token_file):
+                os.remove(self.token_file)
+        except Exception:
+            pass
 
     # ---------- 底层 HTTP ----------
-    def _query(self, sql, params=None):
-        """向 D1 发送一条 SQL，返回 result 数组。失败抛出异常。"""
-        url = self._API_TEMPLATE.format(
-            account_id=self.account_id, database_id=self.database_id)
-        body = json.dumps({"sql": sql, "params": params or []}).encode("utf-8")
-        req = urllib.request.Request(
-            url, data=body, method="POST",
-            headers={
-                "Authorization": f"Bearer {self.api_token}",
-                "Content-Type": "application/json",
-            },
-        )
+    def _post(self, path, payload=None, extra_headers=None, with_token=False):
+        """向 Worker 发送一次 POST，返回解析后的 JSON。
+
+        with_token=True 时附带 Authorization: Bearer。HTTP 401 抛 AuthError，
+        其它失败抛 RuntimeError。
+        """
+        url = f"{self.worker_url}{path}"
+        body = json.dumps(payload or {}).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            # 带浏览器风格 UA：Cloudflare 边缘会拦截 Python-urllib 默认 UA（错误码 1010）
+            "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                           "AppleWebKit/537.36 (KHTML, like Gecko) "
+                           "Chrome/120.0.0.0 Safari/537.36"),
+        }
+        if with_token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        if extra_headers:
+            headers.update(extra_headers)
+
+        req = urllib.request.Request(url, data=body, method="POST", headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
+                return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             detail = ""
             try:
                 detail = e.read().decode("utf-8")
             except Exception:
                 pass
-            raise RuntimeError(f"D1 请求失败 HTTP {e.code}: {detail}") from e
+            if e.code == 401:
+                raise AuthError(detail or "未登录或 token 已过期") from e
+            raise RuntimeError(f"Worker 请求失败 HTTP {e.code}: {detail}") from e
 
-        if not data.get("success"):
-            raise RuntimeError(f"D1 返回错误: {data.get('errors')}")
-        return data.get("result", [])
+    # ---------- 账号 ----------
+    def register(self, username, password, register_secret):
+        """开账号（需要服务端的 REGISTER_SECRET）。成功返回 True，失败抛异常。"""
+        data = self._post(
+            "/register",
+            {"username": username, "password": password},
+            extra_headers={"X-Register-Secret": register_secret},
+        )
+        if not data.get("ok"):
+            raise RuntimeError(data.get("error") or "注册失败")
+        return True
 
-    def ensure_schema(self):
-        """确保两张表存在（只需执行一次）。"""
-        if self._schema_ready:
-            return
-        self._query(
-            "CREATE TABLE IF NOT EXISTS folders ("
-            "name TEXT PRIMARY KEY, position INTEGER NOT NULL)")
-        self._query(
-            "CREATE TABLE IF NOT EXISTS favorites ("
-            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
-            "folder TEXT NOT NULL, "
-            "text TEXT NOT NULL, "
-            "description TEXT DEFAULT '', "
-            "position INTEGER NOT NULL)")
-        self._schema_ready = True
+    def login(self, username, password):
+        """登录换取 token。成功返回 True 并缓存 token，失败抛异常。"""
+        data = self._post("/login", {"username": username, "password": password})
+        if not data.get("ok"):
+            raise RuntimeError(data.get("error") or "登录失败")
+        self.token = data.get("token", "")
+        self.expires_at = data.get("expires_at", 0) or 0
+        self.username = username
+        self._save_token()
+        return True
 
     # ---------- 读取 ----------
     def load(self):
-        """从 D1 读取全部收藏夹数据，返回有序字典。"""
-        self.ensure_schema()
-
-        favorites = {}
-        # 1) 按顺序读取收藏夹（保留空收藏夹）
-        folder_res = self._query("SELECT name FROM folders ORDER BY position ASC")
-        for row in self._rows(folder_res):
-            favorites[row["name"]] = []
-
-        # 2) 读取条目，按所属收藏夹内顺序填充
-        item_res = self._query(
-            "SELECT folder, text, description FROM favorites "
-            "ORDER BY folder ASC, position ASC")
-        for row in self._rows(item_res):
-            folder = row["folder"]
-            favorites.setdefault(folder, []).append({
-                "text": row.get("text") or "",
-                "description": row.get("description") or "",
-            })
-        return favorites
-
-    @staticmethod
-    def _rows(result):
-        """从 D1 result 数组中取出第一条语句的 results 行。"""
-        if result and isinstance(result, list):
-            return result[0].get("results", []) or []
-        return []
+        """从 Worker 读取当前账号的全部收藏夹数据，返回有序字典。"""
+        data = self._post("/load", with_token=True)
+        if not data.get("ok"):
+            raise RuntimeError(data.get("error") or "读取失败")
+        favorites = data.get("favorites") or {}
+        if not isinstance(favorites, dict):
+            return {}
+        result = {}
+        for folder, entries in favorites.items():
+            items = []
+            for entry in entries or []:
+                if isinstance(entry, dict):
+                    items.append({
+                        "text": entry.get("text") or "",
+                        "description": entry.get("description") or "",
+                    })
+                else:
+                    items.append({"text": str(entry), "description": ""})
+            result[folder] = items
+        return result
 
     # ---------- 保存（全量覆盖）----------
     def save(self, favorites):
-        """用传入的数据全量替换 D1 中的收藏夹内容。"""
-        self.ensure_schema()
-
-        # 清空旧数据
-        self._query("DELETE FROM favorites")
-        self._query("DELETE FROM folders")
-
-        # 写入收藏夹顺序
-        folders = list(favorites.keys())
-        if folders:
-            self._bulk_insert(
-                "INSERT INTO folders (name, position) VALUES ",
-                "(?,?)",
-                [(name, pos) for pos, name in enumerate(folders)],
-            )
-
-        # 写入每条收藏
-        items = []
-        for folder, entries in favorites.items():
-            for pos, entry in enumerate(entries):
-                if isinstance(entry, dict):
-                    text = entry.get("text", "")
-                    desc = entry.get("description", "") or ""
-                else:
-                    text, desc = str(entry), ""
-                items.append((folder, text, desc, pos))
-        if items:
-            self._bulk_insert(
-                "INSERT INTO favorites (folder, text, description, position) VALUES ",
-                "(?,?,?,?)",
-                items,
-            )
-
-    def _bulk_insert(self, prefix, row_placeholder, rows):
-        """多行批量插入，自动按参数上限分批。
-
-        prefix: INSERT ... VALUES 前缀
-        row_placeholder: 单行占位符，例如 "(?,?,?,?)"
-        rows: 元组列表，每个元组对应一行的参数
-        """
-        cols = row_placeholder.count("?")
-        chunk_size = max(1, _MAX_BOUND_PARAMS // cols)
-        for i in range(0, len(rows), chunk_size):
-            chunk = rows[i:i + chunk_size]
-            placeholders = ",".join([row_placeholder] * len(chunk))
-            params = []
-            for row in chunk:
-                params.extend(row)
-            self._query(prefix + placeholders, params)
+        """用传入的数据全量替换当前账号的云端收藏夹。"""
+        data = self._post("/save", {"favorites": favorites}, with_token=True)
+        if not data.get("ok"):
+            raise RuntimeError(data.get("error") or "保存失败")
 
     # ---------- 异步保存 ----------
     def save_async(self, favorites):
         """在后台线程保存，避免阻塞 UI；总是推送最新快照。"""
-        # 深拷贝一份快照，避免后续 UI 改动影响保存内容
         snapshot = {
             folder: [dict(e) if isinstance(e, dict) else {"text": str(e), "description": ""}
                      for e in entries]
@@ -228,6 +235,10 @@ class D1Storage:
                     return
             try:
                 self.save(snapshot)
-                print("收藏夹已同步到 Cloudflare D1")
+                print("收藏夹已同步到云端 Worker")
+            except AuthError:
+                # token 失效：丢弃本次快照，标记需要重新登录（主线程下次会处理）
+                print("登录已过期，收藏夹未能同步，请重新登录")
+                self.token = ""
             except Exception as e:
-                print(f"同步到 D1 失败: {e}")
+                print(f"同步到 Worker 失败: {e}")
