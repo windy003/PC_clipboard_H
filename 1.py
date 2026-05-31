@@ -13,6 +13,8 @@ import re
 import traceback
 from pynput.keyboard import Key, Controller
 
+from d1_storage import D1Storage, load_env_file
+
 import keyboard
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
@@ -1462,7 +1464,15 @@ class ClipboardHistoryApp(QMainWindow):
         
         # 存储收藏夹数据
         self.favorites_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.clipboard_favorites.json')
-        
+
+        # 初始化 Cloudflare D1 存储（凭据从同目录 .env 或系统环境变量读取）
+        load_env_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
+        self.d1 = D1Storage.from_env()
+        if self.d1.enabled:
+            print("已启用 Cloudflare D1 收藏夹同步")
+        else:
+            print("未配置 Cloudflare D1，收藏夹仅保存在本地文件")
+
         # 加载收藏记录
         self.load_favorites()
         
@@ -2237,93 +2247,122 @@ class ClipboardHistoryApp(QMainWindow):
                     self.move_to_folder_from_history(current_item, action.text())
     
 
+    def _parse_favorites_file(self):
+        """从本地文件解析收藏夹数据，返回字典；无文件或出错返回 None。"""
+        if not os.path.exists(self.favorites_file):
+            return None
+        with open(self.favorites_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        favorites = {}
+        # 处理旧格式数据（简单列表）
+        if isinstance(data, list):
+            favorites = {
+                "默认收藏夹": [{"text": item, "description": ""} for item in data]
+            }
+        # 新格式数据（字典格式）
+        elif isinstance(data, dict):
+            for folder, items in data.items():
+                favorites[folder] = []
+                for item in items:
+                    if isinstance(item, str):
+                        favorites[folder].append({"text": item, "description": ""})
+                    else:
+                        favorites[folder].append(item)
+        return favorites
+
+    def _apply_loaded_favorites(self, favorites):
+        """把加载到的收藏夹数据应用到界面。"""
+        self.favorites = favorites or {}
+
+        # 确保至少有默认收藏夹
+        if "默认收藏夹" not in self.favorites:
+            self.favorites["默认收藏夹"] = []
+
+        # 更新收藏夹下拉菜单
+        self.folder_combo.clear()
+        self.folder_combo.addItems(self.favorites.keys())
+
+        # 显示默认收藏夹内容
+        self.current_folder = "默认收藏夹"
+        self.folder_combo.setCurrentText("默认收藏夹")
+        self.favorites_list.clear()
+        for item in self.favorites[self.current_folder]:
+            text = item["text"] if isinstance(item, dict) else item
+            truncated_text = self.truncate_text(text)
+            self.favorites_list.addItem(truncated_text)
+        self.update_list_numbers(self.favorites_list)
+
     def load_favorites(self):
-        """从文件加载收藏记录"""
+        """加载收藏记录。
+
+        优先从 Cloudflare D1 读取（作为数据源）；若 D1 为空但本地有数据，
+        则把本地数据迁移上传到 D1；若 D1 未配置或不可用，则回退到本地文件。
+        """
+        # 1) 尝试从 D1 读取
+        if self.d1.enabled:
+            try:
+                d1_favorites = self.d1.load()
+                if d1_favorites:
+                    # D1 已有数据，作为数据源
+                    self._apply_loaded_favorites(d1_favorites)
+                    # 同步一份到本地文件作为离线缓存
+                    self._write_favorites_file()
+                    print("已从 Cloudflare D1 加载收藏夹")
+                    return
+                else:
+                    # D1 为空：若本地有数据则迁移上传
+                    local_favorites = None
+                    try:
+                        local_favorites = self._parse_favorites_file()
+                    except Exception as e:
+                        print(f"读取本地收藏夹失败: {e}")
+                    self._apply_loaded_favorites(local_favorites)
+                    if any(self.favorites.values()):
+                        print("D1 为空，正在迁移本地收藏夹到 D1...")
+                        self.d1.save_async(self.favorites)
+                    return
+            except Exception as e:
+                print(f"从 D1 加载失败，回退到本地文件: {e}")
+
+        # 2) 回退：从本地文件加载
         try:
-            if os.path.exists(self.favorites_file):
-                with open(self.favorites_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    
-                    # 处理旧格式数据（简单列表）
-                    if isinstance(data, list):
-                        self.favorites = {
-                            "默认收藏夹": [{"text": item, "description": ""} for item in data]
-                        }
-                    # 新格式数据（字典格式）
-                    elif isinstance(data, dict):
-                        self.favorites = {}
-                        for folder, items in data.items():
-                            self.favorites[folder] = []
-                            for item in items:
-                                if isinstance(item, str):
-                                    self.favorites[folder].append({"text": item, "description": ""})
-                                else:
-                                    self.favorites[folder].append(item)
-                    
-                    # 确保至少有默认收藏夹
-                    if "默认收藏夹" not in self.favorites:
-                        self.favorites["默认收藏夹"] = []
-                    
-                    # 更新收藏夹下拉菜单
-                    self.folder_combo.clear()
-                    self.folder_combo.addItems(self.favorites.keys())
-                    
-                    # 显示默认收藏夹内容
-                    self.current_folder = "默认收藏夹"
-                    self.folder_combo.setCurrentText("默认收藏夹")
-                    self.favorites_list.clear()
-                    for item in self.favorites[self.current_folder]:
-                        text = item["text"] if isinstance(item, dict) else item
-                        truncated_text = self.truncate_text(text)
-                        self.favorites_list.addItem(truncated_text)
-                    self.update_list_numbers(self.favorites_list)
-                    
-                    # 保存为新格式
-                    self.save_favorites()
-                
+            local_favorites = self._parse_favorites_file()
+            self._apply_loaded_favorites(local_favorites)
+            # 保存为新格式（仅本地）
+            self._write_favorites_file()
         except Exception as e:
             print(f"加载收藏记录时出错: {e}")
             self.favorites = {"默认收藏夹": []}
             self.folder_combo.clear()
             self.folder_combo.addItem("默认收藏夹")
 
+    def _write_favorites_file(self):
+        """把收藏夹数据规整为字典格式并写入本地文件（离线缓存）。"""
+        # 确保所有收藏夹中的项目都使用字典格式
+        for folder_name in self.favorites:
+            for i, item in enumerate(self.favorites[folder_name]):
+                if not isinstance(item, dict):
+                    self.favorites[folder_name][i] = {
+                        "text": str(item),
+                        "description": ""
+                    }
+
+        # 保存到文件
+        with open(self.favorites_file, 'w', encoding='utf-8') as f:
+            json.dump(self.favorites, f, ensure_ascii=False, indent=2)
+
     def save_favorites(self):
-        """保存收藏记录到文件"""
+        """保存收藏记录：写入本地文件，并异步同步到 Cloudflare D1。"""
         try:
-            print(f"开始保存收藏夹...")
-            print(f"收藏夹文件路径: {self.favorites_file}")
-            print(f"收藏夹数量: {len(self.favorites)}")
-            
-            # 确保所有收藏夹中的项目都使用字典格式
-            for folder_name in self.favorites:
-                print(f"处理收藏夹: {folder_name}, 项目数: {len(self.favorites[folder_name])}")
-                for i, item in enumerate(self.favorites[folder_name]):
-                    if not isinstance(item, dict):
-                        print(f"  将项目 {i} 转换为字典格式: {item}")
-                        self.favorites[folder_name][i] = {
-                            "text": str(item),
-                            "description": ""
-                        }
-            
-            # 保存到文件
-            with open(self.favorites_file, 'w', encoding='utf-8') as f:
-                json.dump(self.favorites, f, ensure_ascii=False, indent=2)
-            print(f"收藏已成功保存到: {self.favorites_file}")
-            
-            # 验证文件是否存在
-            if os.path.exists(self.favorites_file):
-                print(f"文件存在，大小: {os.path.getsize(self.favorites_file)} 字节")
-            else:
-                print(f"警告: 文件保存后不存在!")
-            
-            # 尝试重新加载文件以验证
-            try:
-                with open(self.favorites_file, 'r', encoding='utf-8') as f:
-                    test_data = json.load(f)
-                print(f"验证: 成功读取文件，包含 {len(test_data)} 个收藏夹")
-            except Exception as e:
-                print(f"验证读取失败: {e}")
-            
+            # 1) 写入本地文件（快速、作为离线缓存与回退）
+            self._write_favorites_file()
+            print(f"收藏已保存到本地: {self.favorites_file}")
+
+            # 2) 异步推送到 D1（后台线程，不阻塞 UI）
+            if self.d1.enabled:
+                self.d1.save_async(self.favorites)
+
         except Exception as e:
             print(f"保存收藏记录时出错: {e}")
             traceback.print_exc()

@@ -3,3 +3,4 @@ dist
 .claude
 .clipboard_history.json
 .env
+.clipboard_favorites.json
