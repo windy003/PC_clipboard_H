@@ -11,7 +11,7 @@
     { 收藏夹名: [ {"text": ..., "description": ...}, ... ], ... }
 
 注：类名仍为 D1Storage，数据接口（enabled / load / save / save_async）保持不变，
-以便主程序的收藏夹读写逻辑无需改动；新增 login / register / token 管理。
+以便主程序的收藏夹读写逻辑无需改动；新增 login / token 管理（账号注册改由命令行调用 Worker /register）。
 """
 
 import json
@@ -159,17 +159,6 @@ class D1Storage:
             raise RuntimeError(f"Worker 请求失败 HTTP {e.code}: {detail}") from e
 
     # ---------- 账号 ----------
-    def register(self, username, password, register_secret):
-        """开账号（需要服务端的 REGISTER_SECRET）。成功返回 True，失败抛异常。"""
-        data = self._post(
-            "/register",
-            {"username": username, "password": password},
-            extra_headers={"X-Register-Secret": register_secret},
-        )
-        if not data.get("ok"):
-            raise RuntimeError(data.get("error") or "注册失败")
-        return True
-
     def login(self, username, password):
         """登录换取 token。成功返回 True 并缓存 token，失败抛异常。"""
         data = self._post("/login", {"username": username, "password": password})

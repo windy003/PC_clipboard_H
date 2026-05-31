@@ -1323,11 +1323,10 @@ class ListItemDelegate(QStyledItemDelegate):
 
 
 class LoginDialog(QDialog):
-    """云端账号登录对话框（提供注册密钥时也可注册新账号）。"""
-    def __init__(self, parent, storage, register_secret=""):
+    """云端账号登录对话框（账号注册改由命令行调用 Worker /register 完成）。"""
+    def __init__(self, parent, storage):
         super().__init__(parent)
         self.storage = storage
-        self.register_secret = register_secret or ""
         self.setWindowTitle("登录云端同步")
         self.setFixedWidth(320)
 
@@ -1350,19 +1349,12 @@ class LoginDialog(QDialog):
         self.login_btn.clicked.connect(self.do_login)
         btn_layout.addWidget(self.login_btn)
 
-        if self.register_secret:
-            self.register_btn = QPushButton("注册(&R)")
-            self.register_btn.clicked.connect(self.do_register)
-            btn_layout.addWidget(self.register_btn)
-
         self.skip_btn = QPushButton("跳过(&S)")
         self.skip_btn.clicked.connect(self.reject)
         btn_layout.addWidget(self.skip_btn)
         layout.addLayout(btn_layout)
 
-        hint = "可登录或注册新账号；" if self.register_secret else ""
-        hint += "跳过则本次仅使用本地数据"
-        hint_label = QLabel(hint)
+        hint_label = QLabel("跳过则本次仅使用本地数据")
         hint_label.setStyleSheet("color: gray; font-size: 12px;")
         hint_label.setWordWrap(True)
         layout.addWidget(hint_label)
@@ -1383,19 +1375,6 @@ class LoginDialog(QDialog):
             self.accept()
         except Exception as e:
             QMessageBox.critical(self, "登录失败", str(e))
-
-    def do_register(self):
-        u, p = self._creds()
-        if not u or not p:
-            QMessageBox.warning(self, "提示", "请输入账号和密码")
-            return
-        try:
-            self.storage.register(u, p, self.register_secret)
-            self.storage.login(u, p)  # 注册成功后自动登录
-            QMessageBox.information(self, "注册成功", f"已注册并登录：{u}")
-            self.accept()
-        except Exception as e:
-            QMessageBox.critical(self, "注册失败", str(e))
 
 
 class ClipboardHistoryApp(QMainWindow):
@@ -2437,8 +2416,7 @@ class ClipboardHistoryApp(QMainWindow):
         if self.d1.has_valid_token():
             print(f"已使用本地登录凭据：{self.d1.username}")
             return
-        register_secret = os.environ.get("CLIPBOARD_REGISTER_SECRET", "")
-        dialog = LoginDialog(self, self.d1, register_secret=register_secret)
+        dialog = LoginDialog(self, self.d1)
         dialog.exec()
         if self.d1.has_valid_token():
             print(f"已登录云端：{self.d1.username}")
