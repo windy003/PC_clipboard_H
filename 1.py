@@ -116,16 +116,6 @@ class GlobalHotkeyManager(QAbstractNativeEventFilter):
         self._callbacks.clear()
         self._registry.clear()
 
-    def reset(self):
-        """注销并按原配置重新注册所有热键，返回是否全部成功。"""
-        items = [(name, hk, cb) for name, (hid, hk, cb) in self._registry.items()]
-        self.unregister_all()
-        all_ok = True
-        for name, hk, cb in items:
-            if not self.register(name, hk, cb):
-                all_ok = False
-        return all_ok
-
     def nativeEventFilter(self, eventType, message):
         """拦截 WM_HOTKEY 消息并派发到对应回调"""
         if eventType == b"windows_generic_MSG":
@@ -1632,25 +1622,15 @@ class ClipboardHistoryApp(QMainWindow):
     def register_hotkeys(self):
         """注册/重新注册所有全局热键"""
         main_hotkey = self.config.get('hotkey', 'ctrl+windows+a')
+        search_hotkey = self.config.get('search_hotkey', 'ctrl+alt+a')
         ok_main = self.hotkey_manager.register('main', main_hotkey, self.toggle_window)
-        ok_search = self.hotkey_manager.register('search', 'ctrl+alt+a', self.show_search_dialog)
+        ok_search = self.hotkey_manager.register('search', search_hotkey, self.show_search_dialog)
         if (not ok_main or not ok_search) and hasattr(self, 'tray_icon'):
             self.tray_icon.showMessage(
                 "热键注册失败",
-                "部分全局热键注册失败，可能被其它程序占用。可在托盘菜单中重置。",
+                "部分全局热键注册失败，可能被其它程序占用，请在托盘菜单中重新设置。",
                 QSystemTrayIcon.MessageIcon.Warning, 5000)
         return ok_main and ok_search
-
-    def reset_hotkeys(self):
-        """重新注册所有全局热键（用于托盘菜单的重置操作）"""
-        try:
-            if self.hotkey_manager.reset():
-                self.tray_icon.showMessage("热键已重置", "所有全局热键已重新注册", QSystemTrayIcon.MessageIcon.Information, 3000)
-            else:
-                self.tray_icon.showMessage("热键重置异常", "部分热键注册失败，可能被其它程序占用", QSystemTrayIcon.MessageIcon.Warning, 5000)
-        except Exception as e:
-            print(f"重置热键时出错: {e}")
-            self.tray_icon.showMessage("重置失败", f"热键重置失败: {e}", QSystemTrayIcon.MessageIcon.Critical, 5000)
 
     def show_preview(self, current, previous):
         """显示选中条目的完整内容"""
@@ -1799,47 +1779,19 @@ class ClipboardHistoryApp(QMainWindow):
         # 创建托盘菜单
         tray_menu = QMenu()
         
-        # 添加显示/隐藏动作
-        show_action = tray_menu.addAction("显示")
-        show_action.triggered.connect(self.show_window)
-        
-        hide_action = tray_menu.addAction("隐藏")
-        hide_action.triggered.connect(self.hide)
-        
-        # 添加分隔线
-        tray_menu.addSeparator()
-        
-        # 添加设置选项
-        settings_action = tray_menu.addAction("设置")
-        settings_action.triggered.connect(self.show_settings)
-        
-        # 添加分隔线
-        tray_menu.addSeparator()
-        
-        # 添加重置热键选项（添加 Alt+C 快捷键）
-        reset_hotkey = tray_menu.addAction("重置热键(&C)")  # 添加 &C 来设置 Alt+C 快捷键
-        reset_hotkey.triggered.connect(self.reset_hotkeys)
+        # 重新设置唤出快捷键
+        main_hotkey_action = tray_menu.addAction("重新设置唤出快捷键")
+        main_hotkey_action.triggered.connect(self.show_settings)
 
-        # 添加分隔线
-        tray_menu.addSeparator()
-        
-        # 添加版本信息（禁用点击）
-        version_action = tray_menu.addAction("版本: 2025/08/20-01")
-        version_action.setEnabled(False)  # 设置为不可点击
-        
-        # 添加分隔线
-        tray_menu.addSeparator()
-        
-        # 添加搜索选项
-        search_action = tray_menu.addAction("搜索(&S)")
-        search_action.triggered.connect(self.show_search_dialog)
-        
+        # 重新设置搜索快捷键
+        search_hotkey_action = tray_menu.addAction("重新设置搜索快捷键")
+        search_hotkey_action.triggered.connect(self.show_search_hotkey_settings)
+
         self.delete_history = []
 
-
         # 添加分隔线
         tray_menu.addSeparator()
-        
+
         # 添加退出动作
         quit_action = tray_menu.addAction("退出(&X)")
         quit_action.triggered.connect(QApplication.quit)
@@ -2414,7 +2366,7 @@ class ClipboardHistoryApp(QMainWindow):
         self.save_favorites()
 
     def show_settings(self):
-        """显示设置对话框"""
+        """设置唤出快捷键"""
         dialog = HotkeySettingDialog(self, self.config.get('hotkey', 'ctrl+windows+a'))
         if dialog.exec() == QDialog.DialogCode.Accepted:
             new_hotkey = dialog.new_hotkey
@@ -2423,7 +2375,21 @@ class ClipboardHistoryApp(QMainWindow):
                 self.save_config()
                 # 重新注册主热键
                 if self.hotkey_manager.register('main', new_hotkey, self.toggle_window):
-                    QMessageBox.information(self, "设置成功", f"快捷键已更改为: {new_hotkey}")
+                    QMessageBox.information(self, "设置成功", f"唤出快捷键已更改为: {new_hotkey}")
+                else:
+                    QMessageBox.warning(self, "设置失败", f"快捷键 {new_hotkey} 注册失败，可能被其它程序占用，请更换组合。")
+
+    def show_search_hotkey_settings(self):
+        """设置搜索快捷键"""
+        dialog = HotkeySettingDialog(self, self.config.get('search_hotkey', 'ctrl+alt+a'))
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_hotkey = dialog.new_hotkey
+            if new_hotkey != self.config.get('search_hotkey', 'ctrl+alt+a'):
+                self.config['search_hotkey'] = new_hotkey
+                self.save_config()
+                # 重新注册搜索热键
+                if self.hotkey_manager.register('search', new_hotkey, self.show_search_dialog):
+                    QMessageBox.information(self, "设置成功", f"搜索快捷键已更改为: {new_hotkey}")
                 else:
                     QMessageBox.warning(self, "设置失败", f"快捷键 {new_hotkey} 注册失败，可能被其它程序占用，请更换组合。")
 
@@ -2434,10 +2400,10 @@ class ClipboardHistoryApp(QMainWindow):
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     self.config = json.load(f)
             else:
-                self.config = {'hotkey': 'ctrl+windows+a'}
+                self.config = {'hotkey': 'ctrl+windows+a', 'search_hotkey': 'ctrl+alt+a'}
         except Exception as e:
             print(f"加载配置出错: {e}")
-            self.config = {'hotkey': 'ctrl+windows+a'}
+            self.config = {'hotkey': 'ctrl+windows+a', 'search_hotkey': 'ctrl+alt+a'}
 
     def save_config(self):
         """保存配置"""
