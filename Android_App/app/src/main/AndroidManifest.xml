@@ -6,7 +6,8 @@
 
     <application
         android:allowBackup="true"
-        android:label="@string/app_name"
+        android:icon="@drawable/a2048x2048"
+        android:label="D1剪贴板查看器"
         android:supportsRtl="true"
         android:theme="@style/Theme.ClipboardViewer">
         <activity
