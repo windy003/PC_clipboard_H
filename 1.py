@@ -2710,8 +2710,17 @@ class ClipboardHistoryApp(QMainWindow):
             if self.folder_combo.findText(MEMORY_FOLDER) == -1:
                 self.folder_combo.addItem(MEMORY_FOLDER)
 
-        # 取出原始文本并以字典格式加入记忆夹
+        # 取出原始文本
         text = self.clipboard_history[current_row]
+
+        # 若记忆夹中已存在相同文本的条目，则提示并放弃移动
+        for item in self.favorites[MEMORY_FOLDER]:
+            existing_text = item["text"] if isinstance(item, dict) else str(item)
+            if existing_text == text:
+                self.show_toast("条目已存在,移动失败", 2000)
+                return
+
+        # 以字典格式加入记忆夹
         self.favorites[MEMORY_FOLDER].append({"text": text, "description": ""})
 
         # 若当前正显示「记忆」收藏夹，同步刷新其列表显示
