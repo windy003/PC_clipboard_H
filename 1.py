@@ -576,6 +576,64 @@ class PreviewWindow(QWidget):
     
     
 
+class ToastNotification(QWidget):
+    """短暂提示窗口：显示一段文字后，在指定毫秒数后自动消失。
+
+    用于「移动到记忆夹成功」这类轻量反馈，不抢占焦点、置顶显示。
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent, Qt.WindowType.Tool |
+                         Qt.WindowType.FramelessWindowHint |
+                         Qt.WindowType.WindowStaysOnTopHint)
+        # 背景透明以呈现圆角；显示时不激活窗口，避免抢走当前焦点
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        # 用内部 QFrame 承载背景样式（顶层窗口透明时背景样式不直接生效）
+        self.frame = QFrame()
+        self.frame.setObjectName("toast_frame")
+        self.frame.setStyleSheet("""
+            QFrame#toast_frame {
+                background-color: rgba(50, 50, 50, 235);
+                border-radius: 10px;
+            }
+            QLabel {
+                color: white;
+                font-size: 15px;
+                font-weight: bold;
+            }
+        """)
+        inner = QVBoxLayout(self.frame)
+        inner.setContentsMargins(28, 16, 28, 16)
+        self.label = QLabel("")
+        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        inner.addWidget(self.label)
+        outer.addWidget(self.frame)
+
+        # 单次定时器，到点自动隐藏
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.timeout.connect(self.hide)
+
+    def show_message(self, text, duration=2000, anchor=None):
+        """显示提示文字，duration 毫秒后自动消失；anchor 为定位参照窗口（居中其上）。"""
+        self.label.setText(text)
+        self.adjustSize()
+
+        if anchor is not None:
+            geo = anchor.geometry()
+            x = geo.center().x() - self.width() // 2
+            y = geo.center().y() - self.height() // 2
+            self.move(x, y)
+
+        self.show()
+        self.raise_()
+        self._timer.start(duration)
+
+
 class EditItemDialog(QDialog):
     """编辑条目对话框"""
     def __init__(self, parent=None, text=""):
@@ -2000,7 +2058,12 @@ class ClipboardHistoryApp(QMainWindow):
               self.stacked_widget.currentIndex() == 1):
             # 打开收藏夹下拉菜单
             self.folder_combo.showPopup()
-        elif (event.modifiers() == Qt.KeyboardModifier.AltModifier and 
+        # Alt+J：在历史记录面板，将高亮选中的条目移动到「记忆」收藏夹
+        elif (event.modifiers() == Qt.KeyboardModifier.AltModifier and
+              event.key() == Qt.Key.Key_J and
+              self.stacked_widget.currentIndex() == 0):
+            self.move_history_to_memory()
+        elif (event.modifiers() == Qt.KeyboardModifier.AltModifier and
               self.stacked_widget.currentIndex() == 1):
             if event.key() == Qt.Key.Key_Up:
                 self.move_favorite_item(-1)
@@ -2626,6 +2689,42 @@ class ClipboardHistoryApp(QMainWindow):
                 
                 # 保存更改
                 self.save_favorites()
+
+    def show_toast(self, message, duration=2000):
+        """弹出一个短暂提示窗口，duration 毫秒后自动消失（居中于主窗口）。"""
+        if not hasattr(self, '_toast') or self._toast is None:
+            self._toast = ToastNotification(self)
+        self._toast.show_message(message, duration, anchor=self)
+
+    def move_history_to_memory(self):
+        """将历史记录中高亮选中的条目移动到「记忆」收藏夹，并弹出 2 秒成功提示。"""
+        MEMORY_FOLDER = "记忆"
+
+        current_row = self.history_list.currentRow()
+        if current_row < 0 or current_row >= len(self.clipboard_history):
+            return
+
+        # 确保「记忆」收藏夹存在；不存在则创建并加入下拉菜单
+        if MEMORY_FOLDER not in self.favorites:
+            self.favorites[MEMORY_FOLDER] = []
+            if self.folder_combo.findText(MEMORY_FOLDER) == -1:
+                self.folder_combo.addItem(MEMORY_FOLDER)
+
+        # 取出原始文本并以字典格式加入记忆夹
+        text = self.clipboard_history[current_row]
+        self.favorites[MEMORY_FOLDER].append({"text": text, "description": ""})
+
+        # 若当前正显示「记忆」收藏夹，同步刷新其列表显示
+        if self.current_folder == MEMORY_FOLDER:
+            truncated_text = self.truncate_text(text)
+            self.favorites_list.addItem(truncated_text)
+            self.update_list_numbers(self.favorites_list)
+
+        # 保存更改（本地 + 云端同步由 save_favorites 处理）
+        self.save_favorites()
+
+        # 弹出 2 秒后自动消失的成功提示
+        self.show_toast("成功把条目移动到记忆", 2000)
 
     def change_folder(self, folder_name):
         """切换当前收藏夹"""
