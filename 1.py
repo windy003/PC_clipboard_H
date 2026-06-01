@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QListWidget,
                            QVBoxLayout, QPushButton, QWidget, QSystemTrayIcon, QMenu,
                            QHBoxLayout, QStackedWidget, QLabel, QTextEdit, QDialog, QLineEdit, QMessageBox, QComboBox, QInputDialog, QFrame, QScrollArea, QCheckBox,
                            QStyledItemDelegate, QStyle, QStyleOptionViewItem, QListView)
-from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QPoint, QRect, QSize
+from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal, QPoint, QRect, QSize, QAbstractNativeEventFilter
 from PyQt6.QtGui import QClipboard, QIcon, QKeyEvent, QKeySequence, QShortcut, QColor, QPen, QPalette
 import sys
 import json
@@ -11,6 +11,8 @@ import keyboard
 import time
 import re
 import traceback
+import ctypes
+from ctypes import wintypes
 from pynput.keyboard import Key, Controller
 
 from d1_storage import D1Storage, load_env_file
@@ -20,147 +22,120 @@ from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
 
 
-# 修改热键线程的实现
-class HotkeyThread(QThread):
-    triggered = pyqtSignal()
-    error = pyqtSignal(str)
+# ===== 全局热键：使用 Windows 原生 RegisterHotKey =====
+# Windows 修饰键标志
+MOD_ALT = 0x0001
+MOD_CONTROL = 0x0002
+MOD_SHIFT = 0x0004
+MOD_WIN = 0x0008
+MOD_NOREPEAT = 0x4000
+WM_HOTKEY = 0x0312
 
-    def __init__(self, hotkey='ctrl+windows+a'):
-        super().__init__()
-        self.running = True
-        self.hotkey = hotkey
-        self.current_hotkey = None
-        self.retry_count = 0
-        self.max_retries = 5  # 增加最大重试次数
-        self.last_check_time = 0
-        self.check_interval = 180  # 增加检查间隔到3分钟，大幅减少资源消耗
-        self.last_trigger_time = 0
-        self.min_trigger_interval = 0.3  # 减少最小触发间隔
-        self.force_restart_count = 0
-        self.max_force_restart = 3  # 最大强制重启次数
-        
-    def run(self):
-        while self.running:
-            try:
-                # 清理旧的热键注册
-                self.cleanup_hotkey()
-                
-                # 重新注册热键
-                self.current_hotkey = keyboard.add_hotkey(self.hotkey, self.on_hotkey)
-                print(f"热键已注册: {self.hotkey}")
-                self.retry_count = 0
-                self.last_check_time = time.time()
-                
-                while self.running:
-                    self.msleep(100)
-                    
-                    # 定期检查热键状态
-                    current_time = time.time()
-                    if current_time - self.last_check_time > self.check_interval:
-                        print("定期检查热键状态...")
-                        self.last_check_time = current_time
-                        
-                        # 检查热键是否仍然有效
-                        if not self.is_hotkey_active():
-                            print("热键状态异常，准备重新注册")
-                            self.error.emit("热键状态检查失败")
-                            break
-                        
-                        # 移除频繁的热键刷新，避免冲突
-                            
-            except Exception as e:
-                print(f"热键错误: {e}")
-                self.error.emit(str(e))
-                self.retry_count += 1
-                
-                if self.retry_count < self.max_retries:
-                    print(f"尝试重新注册热键 (第 {self.retry_count} 次)")
-                    # 使用指数退避算法，延迟时间逐渐增加
-                    delay = min(2000 * (2 ** (self.retry_count - 1)), 16000)  # 最多延迟16秒
-                    self.msleep(delay)
-                    continue
-                else:
-                    print("热键重试次数已达上限，进入强制重启模式")
-                    self.force_restart_count += 1
-                    if self.force_restart_count < self.max_force_restart:
-                        self.msleep(5000)
-                        self.retry_count = 0
-                        continue
-                    else:
-                        print("强制重启次数已达上限，线程将停止")
-                        break
+_MOD_MAP = {
+    'ctrl': MOD_CONTROL, 'control': MOD_CONTROL,
+    'alt': MOD_ALT,
+    'shift': MOD_SHIFT,
+    'win': MOD_WIN, 'windows': MOD_WIN, 'super': MOD_WIN, 'meta': MOD_WIN,
+}
 
-    def cleanup_hotkey(self):
-        """清理现有的热键注册"""
-        try:
-            if self.current_hotkey is not None:
-                keyboard.remove_hotkey(self.current_hotkey)
-                self.current_hotkey = None
-                # 添加短暂延迟确保清理完成
-                time.sleep(0.1)
-                print("已清理旧的热键注册")
-            # 清理所有热键注册，确保完全清理
-            keyboard.unhook_all_hotkeys()
-            time.sleep(0.1)  # 再次延迟确保清理完成
-        except Exception as e:
-            print(f"清理热键时出错: {e}")
 
-    def refresh_hotkey(self):
-        """刷新热键注册"""
-        try:
-            # 先移除再重新注册来测试热键状态
-            if self.current_hotkey is not None:
-                keyboard.remove_hotkey(self.current_hotkey)
-            self.current_hotkey = keyboard.add_hotkey(self.hotkey, self.on_hotkey)
-            print(f"热键已刷新: {self.hotkey}")
-        except Exception as e:
-            raise e
-
-    def on_hotkey(self):
-        """热键触发处理"""
-        current_time = time.time()
-        # 检查是否满足最小触发间隔
-        if current_time - self.last_trigger_time >= self.min_trigger_interval:
-            print("热键被触发")
-            self.last_trigger_time = current_time
-            self.triggered.emit()
+def parse_hotkey(hotkey_str):
+    """将 'ctrl+windows+a' 这样的字符串解析为 (modifiers, vk)"""
+    modifiers = 0
+    vk = None
+    for part in hotkey_str.lower().replace(' ', '').split('+'):
+        if not part:
+            continue
+        if part in _MOD_MAP:
+            modifiers |= _MOD_MAP[part]
         else:
-            print(f"热键触发被忽略，间隔过短: {current_time - self.last_trigger_time:.2f}s")
+            vk = _key_to_vk(part)
+    return modifiers, vk
 
-    def is_hotkey_active(self):
-        """简化的热键状态检查"""
-        try:
-            # 简单有效的检查方法：只检查热键句柄是否存在
-            if self.current_hotkey is None:
-                print("热键句柄为空")
-                return False
-            
-            # 检查keyboard库是否还在监听
-            if hasattr(keyboard, '_listener') and keyboard._listener:
-                return True
-            else:
-                print("keyboard监听器不活跃")
-                return False
-            
-        except Exception as e:
-            print(f"热键状态检查出错: {e}")
+
+def _key_to_vk(key):
+    """将单个按键名转换为 Windows 虚拟键码"""
+    if len(key) == 1:
+        ch = key.upper()
+        # 字母 A-Z 与数字 0-9 的虚拟键码等于其 ASCII 值
+        if ('A' <= ch <= 'Z') or ('0' <= ch <= '9'):
+            return ord(ch)
+    # 其它字符尝试用系统接口转换
+    return ctypes.windll.user32.VkKeyScanW(ord(key[0])) & 0xFF
+
+
+class GlobalHotkeyManager(QAbstractNativeEventFilter):
+    """使用 Windows 原生 RegisterHotKey 注册全局热键。
+
+    热键消息(WM_HOTKEY)直接由 Qt 主线程的事件循环分发，通过本事件
+    过滤器接收并派发，无需独立线程与底层键盘钩子，稳定可靠。
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._user32 = ctypes.windll.user32
+        self._callbacks = {}   # hotkey_id -> callback
+        self._registry = {}    # name -> (hotkey_id, hotkey_str, callback)
+        self._next_id = 1
+
+    def register(self, name, hotkey_str, callback):
+        """注册一个全局热键；name 作为唯一标识，便于后续更新/注销。返回是否成功。"""
+        # 先清理同名旧热键，避免重复注册
+        self.unregister(name)
+
+        modifiers, vk = parse_hotkey(hotkey_str)
+        if vk is None:
+            print(f"无效的热键: {hotkey_str}")
             return False
 
-    def stop(self):
-        """停止热键线程"""
-        print("正在停止热键线程...")
-        self.running = False
-        self.cleanup_hotkey()
-        
-        # 确保线程完全停止
-        if self.isRunning():
-            self.quit()
-            if not self.wait(2000):  # 等待2秒
-                print("热键线程强制终止")
-                self.terminate()
-                self.wait()
-        
-        print("热键线程已停止")
+        hotkey_id = self._next_id
+        self._next_id += 1
+
+        # MOD_NOREPEAT 避免长按时重复触发
+        if not self._user32.RegisterHotKey(None, hotkey_id, modifiers | MOD_NOREPEAT, vk):
+            print(f"注册热键失败: {hotkey_str} (可能已被其它程序占用)")
+            return False
+
+        self._callbacks[hotkey_id] = callback
+        self._registry[name] = (hotkey_id, hotkey_str, callback)
+        print(f"已注册全局热键: {name} -> {hotkey_str}")
+        return True
+
+    def unregister(self, name):
+        """注销指定名称的热键"""
+        info = self._registry.pop(name, None)
+        if info:
+            hotkey_id = info[0]
+            self._user32.UnregisterHotKey(None, hotkey_id)
+            self._callbacks.pop(hotkey_id, None)
+
+    def unregister_all(self):
+        """注销全部热键"""
+        for hotkey_id in list(self._callbacks):
+            self._user32.UnregisterHotKey(None, hotkey_id)
+        self._callbacks.clear()
+        self._registry.clear()
+
+    def reset(self):
+        """注销并按原配置重新注册所有热键，返回是否全部成功。"""
+        items = [(name, hk, cb) for name, (hid, hk, cb) in self._registry.items()]
+        self.unregister_all()
+        all_ok = True
+        for name, hk, cb in items:
+            if not self.register(name, hk, cb):
+                all_ok = False
+        return all_ok
+
+    def nativeEventFilter(self, eventType, message):
+        """拦截 WM_HOTKEY 消息并派发到对应回调"""
+        if eventType == b"windows_generic_MSG":
+            msg = wintypes.MSG.from_address(int(message))
+            if msg.message == WM_HOTKEY:
+                callback = self._callbacks.get(msg.wParam)
+                if callback:
+                    callback()
+                    return True, 0
+        return False, 0
 
 class HotkeySettingDialog(QDialog):
     """热键设置对话框"""
@@ -1614,20 +1589,14 @@ class ClipboardHistoryApp(QMainWindow):
         self.config_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.clipboard_config.json')
         self.load_config()
         
-        # 创建并启动热键线程
-        self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+windows+a'))
-        self.hotkey_thread.triggered.connect(self.toggle_window)
-        self.hotkey_thread.error.connect(self.handle_hotkey_error)  # 连接错误处理
-        self.hotkey_thread.start()
-        
-        # 创建搜索热键线程
-        self.search_hotkey_thread = HotkeyThread('ctrl+alt+a')
-        self.search_hotkey_thread.triggered.connect(self.show_search_dialog)
-        self.search_hotkey_thread.error.connect(self.handle_search_hotkey_error)
-        self.search_hotkey_thread.start()
-        
         # 创建系统托盘图标 (只调用一次)
         self.create_tray_icon()
+
+        # 创建全局热键管理器（使用 Windows 原生 RegisterHotKey，稳定可靠）
+        self.hotkey_manager = GlobalHotkeyManager()
+        QApplication.instance().installNativeEventFilter(self.hotkey_manager)
+        QApplication.instance().aboutToQuit.connect(self.hotkey_manager.unregister_all)
+        self.register_hotkeys()
         
         # 设置窗口标志，移除关闭按钮
         self.setWindowFlags(
@@ -1653,11 +1622,6 @@ class ClipboardHistoryApp(QMainWindow):
         self.history_list.currentItemChanged.connect(self.show_preview)
         self.favorites_list.currentItemChanged.connect(self.show_preview)
         
-        # 创建热键状态检查定时器
-        self.hotkey_check_timer = QTimer()
-        self.hotkey_check_timer.timeout.connect(self.check_hotkey_threads)
-        self.hotkey_check_timer.start(300000)  # 改为每5分钟检查一次，大幅减少频率
-        
         # 用于处理编号输入的变量
         self.number_input_buffer = ""
         self.number_input_timer = QTimer()
@@ -1665,104 +1629,28 @@ class ClipboardHistoryApp(QMainWindow):
         self.number_input_timer.timeout.connect(self.clear_number_input)
         self.number_input_timer.setInterval(2000)  # 2秒后清空输入缓冲
         
-        # 添加热键重启计数
-        self.hotkey_restart_count = 0
-        self.search_hotkey_restart_count = 0
-        self.max_restart_count = 10  # 最大重启次数
-        
-    def check_hotkey_threads(self):
-        """检查热键线程状态"""
-        try:
-            # 检查主热键线程
-            if not self.hotkey_thread.isRunning():
-                print("主热键线程已停止，正在重启...")
-                self.restart_main_hotkey()
-            elif hasattr(self.hotkey_thread, 'force_restart_count') and self.hotkey_thread.force_restart_count >= 3:
-                print("主热键线程强制重启次数过多，完全重建线程...")
-                self.restart_main_hotkey()
-            
-            # 检查搜索热键线程
-            if not self.search_hotkey_thread.isRunning():
-                print("搜索热键线程已停止，正在重启...")
-                self.restart_search_hotkey()
-            elif hasattr(self.search_hotkey_thread, 'force_restart_count') and self.search_hotkey_thread.force_restart_count >= 3:
-                print("搜索热键线程强制重启次数过多，完全重建线程...")
-                self.restart_search_hotkey()
-                
-        except Exception as e:
-            print(f"检查热键线程状态时出错: {e}")
+    def register_hotkeys(self):
+        """注册/重新注册所有全局热键"""
+        main_hotkey = self.config.get('hotkey', 'ctrl+windows+a')
+        ok_main = self.hotkey_manager.register('main', main_hotkey, self.toggle_window)
+        ok_search = self.hotkey_manager.register('search', 'ctrl+alt+a', self.show_search_dialog)
+        if (not ok_main or not ok_search) and hasattr(self, 'tray_icon'):
+            self.tray_icon.showMessage(
+                "热键注册失败",
+                "部分全局热键注册失败，可能被其它程序占用。可在托盘菜单中重置。",
+                QSystemTrayIcon.MessageIcon.Warning, 5000)
+        return ok_main and ok_search
 
-    def restart_main_hotkey(self):
-        """重启主热键线程"""
+    def reset_hotkeys(self):
+        """重新注册所有全局热键（用于托盘菜单的重置操作）"""
         try:
-            if self.hotkey_restart_count >= self.max_restart_count:
-                print("主热键重启次数已达上限，停止重启")
-                self.tray_icon.showMessage("热键错误", "主热键重启次数过多，请手动重置", QSystemTrayIcon.MessageIcon.Critical, 5000)
-                return
-            
-            self.hotkey_restart_count += 1
-            print(f"重启主热键线程 (第 {self.hotkey_restart_count} 次)")
-            
-            # 完全停止并清理旧线程
-            if hasattr(self, 'hotkey_thread'):
-                self.hotkey_thread.stop()
-                self.hotkey_thread.wait(3000)  # 等待3秒
-                if self.hotkey_thread.isRunning():
-                    self.hotkey_thread.terminate()
-                    self.hotkey_thread.wait()
-            
-            # 短暂延迟后创建新线程
-            QTimer.singleShot(1000, self.create_new_main_hotkey_thread)
-            
+            if self.hotkey_manager.reset():
+                self.tray_icon.showMessage("热键已重置", "所有全局热键已重新注册", QSystemTrayIcon.MessageIcon.Information, 3000)
+            else:
+                self.tray_icon.showMessage("热键重置异常", "部分热键注册失败，可能被其它程序占用", QSystemTrayIcon.MessageIcon.Warning, 5000)
         except Exception as e:
-            print(f"重启主热键线程时出错: {e}")
-
-    def create_new_main_hotkey_thread(self):
-        """创建新的主热键线程"""
-        try:
-            self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+windows+a'))
-            self.hotkey_thread.triggered.connect(self.toggle_window)
-            self.hotkey_thread.error.connect(self.handle_hotkey_error)
-            self.hotkey_thread.start()
-            print("新的主热键线程已创建")
-        except Exception as e:
-            print(f"创建新主热键线程时出错: {e}")
-
-    def restart_search_hotkey(self):
-        """重启搜索热键线程"""
-        try:
-            if self.search_hotkey_restart_count >= self.max_restart_count:
-                print("搜索热键重启次数已达上限，停止重启")
-                self.tray_icon.showMessage("热键错误", "搜索热键重启次数过多，请手动重置", QSystemTrayIcon.MessageIcon.Critical, 5000)
-                return
-            
-            self.search_hotkey_restart_count += 1
-            print(f"重启搜索热键线程 (第 {self.search_hotkey_restart_count} 次)")
-            
-            # 完全停止并清理旧线程
-            if hasattr(self, 'search_hotkey_thread'):
-                self.search_hotkey_thread.stop()
-                self.search_hotkey_thread.wait(3000)  # 等待3秒
-                if self.search_hotkey_thread.isRunning():
-                    self.search_hotkey_thread.terminate()
-                    self.search_hotkey_thread.wait()
-            
-            # 短暂延迟后创建新线程
-            QTimer.singleShot(1000, self.create_new_search_hotkey_thread)
-            
-        except Exception as e:
-            print(f"重启搜索热键线程时出错: {e}")
-
-    def create_new_search_hotkey_thread(self):
-        """创建新的搜索热键线程"""
-        try:
-            self.search_hotkey_thread = HotkeyThread('ctrl+alt+a')
-            self.search_hotkey_thread.triggered.connect(self.show_search_dialog)
-            self.search_hotkey_thread.error.connect(self.handle_search_hotkey_error)
-            self.search_hotkey_thread.start()
-            print("新的搜索热键线程已创建")
-        except Exception as e:
-            print(f"创建新搜索热键线程时出错: {e}")
+            print(f"重置热键时出错: {e}")
+            self.tray_icon.showMessage("重置失败", f"热键重置失败: {e}", QSystemTrayIcon.MessageIcon.Critical, 5000)
 
     def show_preview(self, current, previous):
         """显示选中条目的完整内容"""
@@ -1930,12 +1818,8 @@ class ClipboardHistoryApp(QMainWindow):
         
         # 添加重置热键选项（添加 Alt+C 快捷键）
         reset_hotkey = tray_menu.addAction("重置热键(&C)")  # 添加 &C 来设置 Alt+C 快捷键
-        reset_hotkey.triggered.connect(self.handle_hotkey_error)
-        
-        # 添加完全重置热键选项
-        full_reset_hotkey = tray_menu.addAction("完全重置热键(&F)")  # 添加 &F 来设置 Alt+F 快捷键
-        full_reset_hotkey.triggered.connect(self.full_reset_hotkeys)
-        
+        reset_hotkey.triggered.connect(self.reset_hotkeys)
+
         # 添加分隔线
         tray_menu.addSeparator()
         
@@ -2302,12 +2186,11 @@ class ClipboardHistoryApp(QMainWindow):
 
     def __del__(self):
         """确保程序退出时清理热键"""
-        if hasattr(self, 'hotkey_thread'):
-            self.hotkey_thread.stop()
-            self.hotkey_thread.wait()
-        if hasattr(self, 'search_hotkey_thread'):
-            self.search_hotkey_thread.stop()
-            self.search_hotkey_thread.wait()
+        try:
+            if hasattr(self, 'hotkey_manager'):
+                self.hotkey_manager.unregister_all()
+        except Exception:
+            pass
 
     def eventFilter(self, obj, event):
         """事件过滤器，处理窗口事件"""
@@ -2538,13 +2421,11 @@ class ClipboardHistoryApp(QMainWindow):
             if new_hotkey != self.config.get('hotkey'):
                 self.config['hotkey'] = new_hotkey
                 self.save_config()
-                # 重启热键线程
-                self.hotkey_thread.stop()
-                self.hotkey_thread.wait()
-                self.hotkey_thread = HotkeyThread(new_hotkey)
-                self.hotkey_thread.triggered.connect(self.toggle_window)
-                self.hotkey_thread.start()
-                QMessageBox.information(self, "设置成功", f"快捷键已更改为: {new_hotkey}")
+                # 重新注册主热键
+                if self.hotkey_manager.register('main', new_hotkey, self.toggle_window):
+                    QMessageBox.information(self, "设置成功", f"快捷键已更改为: {new_hotkey}")
+                else:
+                    QMessageBox.warning(self, "设置失败", f"快捷键 {new_hotkey} 注册失败，可能被其它程序占用，请更换组合。")
 
     def load_config(self):
         """加载配置"""
@@ -2848,94 +2729,6 @@ class ClipboardHistoryApp(QMainWindow):
             
             QMessageBox.information(self, "成功", "收藏夹已删除！")
 
-    def handle_hotkey_error(self, error_msg=""):
-        """处理热键错误"""
-        print(f"热键错误，正在重新初始化: {error_msg}")
-        
-        # 重置强制重启计数，给线程重新开始的机会
-        if hasattr(self, 'hotkey_thread') and hasattr(self.hotkey_thread, 'force_restart_count'):
-            self.hotkey_thread.force_restart_count = 0
-        
-        # 重新初始化热键线程
-        try:
-            # 完全停止旧线程
-            if hasattr(self, 'hotkey_thread'):
-                self.hotkey_thread.stop()
-                self.hotkey_thread.wait(3000)  # 等待3秒
-                
-                # 如果线程仍在运行，强制终止
-                if self.hotkey_thread.isRunning():
-                    print("强制终止热键线程")
-                    self.hotkey_thread.terminate()
-                    self.hotkey_thread.wait()
-        except Exception as e:
-            print(f"停止热键线程时出错: {e}")
-        
-        # 使用指数退避算法，延迟时间逐渐增加
-        delay = min(3000 * (2 ** self.hotkey_restart_count), 30000)  # 最多延迟30秒
-        QTimer.singleShot(delay, self.recreate_main_hotkey_thread)
-
-    def recreate_main_hotkey_thread(self):
-        """重新创建主热键线程"""
-        try:
-            # 创建新的热键线程
-            self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+windows+a'))
-            self.hotkey_thread.triggered.connect(self.toggle_window)
-            self.hotkey_thread.error.connect(self.handle_hotkey_error)
-            self.hotkey_thread.start()
-            
-            # 显示通知
-            self.tray_icon.showMessage("热键已重置", f"快捷键 {self.config.get('hotkey', 'ctrl+windows+a')} 已重新注册", QSystemTrayIcon.MessageIcon.Information, 3000)
-            print("主热键线程重新创建完成")
-            
-        except Exception as e:
-            print(f"重新创建主热键线程时出错: {e}")
-            # 如果重新创建失败，延迟后再次尝试
-            QTimer.singleShot(5000, self.recreate_main_hotkey_thread)
-
-    def handle_search_hotkey_error(self, error_msg=""):
-        """处理搜索热键错误"""
-        print(f"搜索热键错误，正在重新初始化: {error_msg}")
-        
-        # 重置强制重启计数
-        if hasattr(self, 'search_hotkey_thread') and hasattr(self.search_hotkey_thread, 'force_restart_count'):
-            self.search_hotkey_thread.force_restart_count = 0
-        
-        try:
-            # 完全停止旧线程
-            if hasattr(self, 'search_hotkey_thread'):
-                self.search_hotkey_thread.stop()
-                self.search_hotkey_thread.wait(3000)
-                
-                if self.search_hotkey_thread.isRunning():
-                    print("强制终止搜索热键线程")
-                    self.search_hotkey_thread.terminate()
-                    self.search_hotkey_thread.wait()
-        except Exception as e:
-            print(f"停止搜索热键线程时出错: {e}")
-        
-        # 使用指数退避算法，延迟时间逐渐增加
-        delay = min(3000 * (2 ** self.search_hotkey_restart_count), 30000)  # 最多延迟30秒
-        QTimer.singleShot(delay, self.recreate_search_hotkey_thread)
-
-    def recreate_search_hotkey_thread(self):
-        """重新创建搜索热键线程"""
-        try:
-            # 创建新的热键线程
-            self.search_hotkey_thread = HotkeyThread('ctrl+alt+a')
-            self.search_hotkey_thread.triggered.connect(self.show_search_dialog)
-            self.search_hotkey_thread.error.connect(self.handle_search_hotkey_error)
-            self.search_hotkey_thread.start()
-            
-            # 显示通知
-            self.tray_icon.showMessage("搜索热键已重置", "快捷键 ctrl+alt+a 已重新注册", QSystemTrayIcon.MessageIcon.Information, 3000)
-            print("搜索热键线程重新创建完成")
-            
-        except Exception as e:
-            print(f"重新创建搜索热键线程时出错: {e}")
-            # 如果重新创建失败，延迟后再次尝试
-            QTimer.singleShot(5000, self.recreate_search_hotkey_thread)
-
     def set_content(self, text, description=""):
         """设置预览窗口内容"""
         self.preview_window.set_content(text, description)
@@ -3181,67 +2974,6 @@ class ClipboardHistoryApp(QMainWindow):
         else:
             # 普通包含匹配
             return pattern in text
-
-    def full_reset_hotkeys(self):
-        """完全重置热键系统"""
-        print("开始完全重置热键系统...")
-        
-        try:
-            # 重置所有计数器
-            self.hotkey_restart_count = 0
-            self.search_hotkey_restart_count = 0
-            
-            # 停止主热键线程
-            if hasattr(self, 'hotkey_thread'):
-                print("停止主热键线程...")
-                self.hotkey_thread.stop()
-                self.hotkey_thread.wait(5000)  # 等待5秒
-                if self.hotkey_thread.isRunning():
-                    self.hotkey_thread.terminate()
-                    self.hotkey_thread.wait()
-            
-            # 停止搜索热键线程
-            if hasattr(self, 'search_hotkey_thread'):
-                print("停止搜索热键线程...")
-                self.search_hotkey_thread.stop()
-                self.search_hotkey_thread.wait(5000)  # 等待5秒
-                if self.search_hotkey_thread.isRunning():
-                    self.search_hotkey_thread.terminate()
-                    self.search_hotkey_thread.wait()
-            
-            # 延迟后重新创建热键线程
-            QTimer.singleShot(2000, self.recreate_all_hotkey_threads)
-            
-            # 显示通知
-            self.tray_icon.showMessage("热键重置中", "正在完全重置热键系统，请稍候...", QSystemTrayIcon.MessageIcon.Information, 3000)
-            
-        except Exception as e:
-            print(f"完全重置热键时出错: {e}")
-            self.tray_icon.showMessage("重置失败", f"热键重置失败: {str(e)}", QSystemTrayIcon.MessageIcon.Critical, 5000)
-
-    def recreate_all_hotkey_threads(self):
-        """重新创建所有热键线程"""
-        try:
-            print("重新创建所有热键线程...")
-
-            # 创建主热键线程
-            self.hotkey_thread = HotkeyThread(self.config.get('hotkey', 'ctrl+windows+a'))
-            self.hotkey_thread.triggered.connect(self.toggle_window)
-            self.hotkey_thread.error.connect(self.handle_hotkey_error)
-            self.hotkey_thread.start()
-            
-            # 创建搜索热键线程
-            self.search_hotkey_thread = HotkeyThread('ctrl+alt+a')
-            self.search_hotkey_thread.triggered.connect(self.show_search_dialog)
-            self.search_hotkey_thread.error.connect(self.handle_search_hotkey_error)
-            self.search_hotkey_thread.start()
-            
-            print("所有热键线程重新创建完成")
-            self.tray_icon.showMessage("重置完成", "热键系统已完全重置并重新启动", QSystemTrayIcon.MessageIcon.Information, 3000)
-            
-        except Exception as e:
-            print(f"重新创建热键线程时出错: {e}")
-            self.tray_icon.showMessage("重置失败", f"重新创建热键线程失败: {str(e)}", QSystemTrayIcon.MessageIcon.Critical, 5000)
 
 def get_resource_path(relative_path):
     """获取资源文件的绝对路径"""
