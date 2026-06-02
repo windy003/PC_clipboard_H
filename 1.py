@@ -59,16 +59,6 @@ def _any_key_down():
     return False
 
 
-def _mem_log(msg):
-    """临时调试：把 Alt+Y / 提权流程的信息追加写入日志文件。"""
-    try:
-        log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_memory_debug.log')
-        with open(log_path, 'a', encoding='utf-8') as f:
-            f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
-    except Exception:
-        pass
-
-
 # ===== 全局热键：使用 Windows 原生 RegisterHotKey =====
 # Windows 修饰键标志
 MOD_ALT = 0x0001
@@ -1641,6 +1631,9 @@ class ClipboardHistoryApp(QMainWindow):
         # 创建系统托盘图标 (只调用一次)
         self.create_tray_icon()
 
+        # 创建显示「记忆」条目数的数字托盘图标（每分钟刷新）
+        self.create_count_tray_icon()
+
         # 创建全局热键管理器（使用 Windows 原生 RegisterHotKey，稳定可靠）
         self.hotkey_manager = GlobalHotkeyManager()
         QApplication.instance().installNativeEventFilter(self.hotkey_manager)
@@ -1879,6 +1872,58 @@ class ClipboardHistoryApp(QMainWindow):
         painter.setBrush(QColor(0, 120, 212))  # 使用蓝色
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(0, 0, 32, 32)
+        painter.end()
+        return QIcon(pixmap)
+
+    def create_count_tray_icon(self):
+        """创建第二个托盘图标，用数字显示「记忆」收藏夹的条目数，每分钟刷新。"""
+        self.count_tray_icon = QSystemTrayIcon(self)
+
+        # 右键菜单：显示主窗口 / 退出
+        menu = QMenu()
+        show_action = menu.addAction("显示主窗口")
+        show_action.triggered.connect(self.show_window)
+        menu.addSeparator()
+        quit_action = menu.addAction("退出(&X)")
+        quit_action.triggered.connect(QApplication.quit)
+        self.count_tray_icon.setContextMenu(menu)
+
+        # 双击与主托盘一致：显示/隐藏窗口
+        self.count_tray_icon.activated.connect(self.tray_icon_activated)
+        self.count_tray_icon.show()
+
+        # 立即刷新一次，并每分钟刷新一次
+        self.update_memory_count_icon()
+        self.count_timer = QTimer(self)
+        self.count_timer.timeout.connect(self.update_memory_count_icon)
+        self.count_timer.start(60000)  # 60 秒
+
+    def update_memory_count_icon(self):
+        """刷新「记忆」条目数托盘图标及其提示。"""
+        count = len(self.favorites.get("记忆", []))
+        self.count_tray_icon.setIcon(self.render_count_icon(count))
+        self.count_tray_icon.setToolTip(f"记忆文件夹：{count} 条目")
+
+    def render_count_icon(self, count):
+        """把条目数画成一个方底白字、尽量占满的托盘图标。"""
+        from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
+        size = 64
+        pixmap = QPixmap(size, size)
+        # 方形背景：整块填充，不留透明边
+        pixmap.fill(QColor("#1565C0"))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+
+        # 数字文本（超过 999 显示 999+）
+        text = str(count) if count <= 999 else "999+"
+        font = QFont()
+        font.setBold(True)
+        # 按位数自适应字号，尽量填满整个方形
+        font.setPixelSize({1: 60, 2: 50, 3: 38}.get(len(text), 28))
+        painter.setFont(font)
+        painter.setPen(QColor("#FFFFFF"))
+        painter.drawText(pixmap.rect(), int(Qt.AlignmentFlag.AlignCenter), text)
         painter.end()
         return QIcon(pixmap)
 
@@ -2681,11 +2726,6 @@ class ClipboardHistoryApp(QMainWindow):
     def _do_copy_for_memory(self):
         """模拟 Ctrl+C，再让出事件循环等目标程序写入剪贴板后读取。"""
         try:
-            try:
-                _admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
-            except Exception:
-                _admin = "?"
-            _mem_log(f"_do_copy: 本程序管理员={_admin}，模拟 Ctrl+C")
             # 用 pynput（虚拟键码）模拟 Ctrl+C，比 keyboard 库的扫描码兼容性更好
             kb = Controller()
             kb.press(Key.ctrl)
@@ -2703,7 +2743,6 @@ class ClipboardHistoryApp(QMainWindow):
         try:
             text = self.clipboard.text()
             win_text = _win_clipboard_text()
-            _mem_log(f"_save: 读取剪贴板 Qt={text!r} Win={win_text!r}")
 
             # Qt 偶尔读不到他进程刚写入的内容，用 Windows API 的结果兜底
             if not text and win_text:
@@ -3163,14 +3202,10 @@ def ensure_admin():
     if sys.platform != "win32":
         return
     try:
-        is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
-    except Exception as e:
-        _mem_log(f"ensure_admin: IsUserAnAdmin 异常 {e}")
+        if ctypes.windll.shell32.IsUserAnAdmin():
+            return  # 已是管理员，无需处理
+    except Exception:
         return
-
-    _mem_log(f"ensure_admin: 启动，当前管理员={is_admin}, frozen={getattr(sys, 'frozen', False)}, exe={sys.executable}")
-    if is_admin:
-        return  # 已是管理员，无需处理
 
     try:
         import subprocess
@@ -3185,11 +3220,9 @@ def ensure_admin():
 
         # "runas" 触发 UAC 提权；成功则退出当前未提权实例
         ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, None, 1)
-        _mem_log(f"ensure_admin: ShellExecuteW 返回 {ret} (>32 表示已启动提权实例)")
         if ret > 32:
             sys.exit(0)
     except Exception as e:
-        _mem_log(f"ensure_admin: 请求管理员权限失败 {e}")
         print(f"请求管理员权限失败: {e}")
 
 
