@@ -584,12 +584,24 @@ class ToastNotification(QWidget):
         self._timer.timeout.connect(self.hide)
 
     def show_message(self, text, duration=2000, anchor=None):
-        """显示提示文字，duration 毫秒后自动消失；anchor 为定位参照窗口（居中其上）。"""
+        """显示提示文字，duration 毫秒后自动消失。
+
+        anchor 为定位参照窗口（居中其上）；若 anchor 为 None 或不可见，则居中到
+        鼠标当前所在的屏幕——这样在主窗口隐藏（全局热键触发）时也能正常显示。
+        """
         self.label.setText(text)
         self.adjustSize()
 
-        if anchor is not None:
+        if anchor is not None and anchor.isVisible():
             geo = anchor.geometry()
+            x = geo.center().x() - self.width() // 2
+            y = geo.center().y() - self.height() // 2
+            self.move(x, y)
+        else:
+            # 居中到鼠标所在屏幕（多屏时定位更准确）
+            from PyQt6.QtGui import QCursor
+            screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+            geo = screen.geometry()
             x = geo.center().x() - self.width() // 2
             y = geo.center().y() - self.height() // 2
             self.move(x, y)
@@ -1623,8 +1635,11 @@ class ClipboardHistoryApp(QMainWindow):
         """注册/重新注册所有全局热键"""
         main_hotkey = self.config.get('hotkey', 'ctrl+windows+a')
         search_hotkey = self.config.get('search_hotkey', 'ctrl+alt+a')
+        memory_hotkey = self.config.get('memory_hotkey', 'alt+y')
         ok_main = self.hotkey_manager.register('main', main_hotkey, self.toggle_window)
         ok_search = self.hotkey_manager.register('search', search_hotkey, self.show_search_dialog)
+        # Alt+Y：全局热键，任何窗口下都可把最近一条剪贴板移动到「记忆」收藏夹
+        self.hotkey_manager.register('memory', memory_hotkey, self.move_latest_clipboard_to_memory)
         if (not ok_main or not ok_search) and hasattr(self, 'tray_icon'):
             self.tray_icon.showMessage(
                 "热键注册失败",
@@ -2581,6 +2596,50 @@ class ClipboardHistoryApp(QMainWindow):
 
         # 弹出 2 秒后自动消失的成功提示
         self.show_toast("成功把条目移动到记忆", 2000)
+
+    def move_latest_clipboard_to_memory(self):
+        """全局热键(Alt+Y)回调：把最近一条剪贴板内容移动到「记忆」收藏夹。
+
+        不依赖应用窗口是否聚焦/可见，移动后弹出 1 秒成功提示（居中于鼠标所在屏幕）。
+        """
+        MEMORY_FOLDER = "记忆"
+
+        # 取最近一条：历史记录开头即最新；为空则回退到当前剪贴板文本
+        if self.clipboard_history:
+            text = self.clipboard_history[0]
+        else:
+            text = self.clipboard.text()
+        if not text:
+            self.show_toast("剪贴板为空，移动失败", 1000)
+            return
+
+        # 确保「记忆」收藏夹存在；不存在则创建并加入下拉菜单
+        if MEMORY_FOLDER not in self.favorites:
+            self.favorites[MEMORY_FOLDER] = []
+            if self.folder_combo.findText(MEMORY_FOLDER) == -1:
+                self.folder_combo.addItem(MEMORY_FOLDER)
+
+        # 若记忆夹中已存在相同文本的条目，则提示并放弃移动
+        for item in self.favorites[MEMORY_FOLDER]:
+            existing_text = item["text"] if isinstance(item, dict) else str(item)
+            if existing_text == text:
+                self.show_toast("条目已存在，移动失败", 1000)
+                return
+
+        # 以字典格式加入记忆夹
+        self.favorites[MEMORY_FOLDER].append({"text": text, "description": ""})
+
+        # 若当前正显示「记忆」收藏夹，同步刷新其列表显示
+        if self.current_folder == MEMORY_FOLDER:
+            truncated_text = self.truncate_text(text)
+            self.favorites_list.addItem(truncated_text)
+            self.update_list_numbers(self.favorites_list)
+
+        # 保存更改（本地 + 云端同步由 save_favorites 处理）
+        self.save_favorites()
+
+        # 弹出 1 秒后自动消失的成功提示
+        self.show_toast("移动最近一条剪贴板到记忆文件夹成功", 1000)
 
     def change_folder(self, folder_name):
         """切换当前收藏夹"""
