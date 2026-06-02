@@ -22,6 +22,53 @@ from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
 
 
+def _win_clipboard_text():
+    """用 Windows API 直接读取剪贴板里的 Unicode 文本（Qt 偶尔读不到他进程刚写入的内容时兜底）。"""
+    CF_UNICODETEXT = 13
+    u = ctypes.windll.user32
+    k = ctypes.windll.kernel32
+    if not u.OpenClipboard(0):
+        return None
+    try:
+        h = u.GetClipboardData(CF_UNICODETEXT)
+        if not h:
+            return ''
+        k.GlobalLock.restype = ctypes.c_void_p
+        k.GlobalLock.argtypes = [ctypes.c_void_p]
+        ptr = k.GlobalLock(h)
+        if not ptr:
+            return ''
+        try:
+            return ctypes.c_wchar_p(ptr).value
+        finally:
+            k.GlobalUnlock(h)
+    finally:
+        u.CloseClipboard()
+
+
+def _any_key_down():
+    """检测键盘上是否还有任意按键（不含鼠标键）处于按下状态。"""
+    try:
+        gaks = ctypes.windll.user32.GetAsyncKeyState
+        # 跳过 0x01-0x07 的鼠标键，检查其余虚拟键码
+        for vk in range(0x08, 0xFF):
+            if gaks(vk) & 0x8000:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _mem_log(msg):
+    """临时调试：把 Alt+Y / 提权流程的信息追加写入日志文件。"""
+    try:
+        log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '_memory_debug.log')
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
+    except Exception:
+        pass
+
+
 # ===== 全局热键：使用 Windows 原生 RegisterHotKey =====
 # Windows 修饰键标志
 MOD_ALT = 0x0001
@@ -1636,10 +1683,13 @@ class ClipboardHistoryApp(QMainWindow):
         main_hotkey = self.config.get('hotkey', 'ctrl+windows+a')
         search_hotkey = self.config.get('search_hotkey', 'ctrl+alt+a')
         memory_hotkey = self.config.get('memory_hotkey', 'alt+y')
+        terminal_memory_hotkey = self.config.get('terminal_memory_hotkey', 'alt+d')
         ok_main = self.hotkey_manager.register('main', main_hotkey, self.toggle_window)
         ok_search = self.hotkey_manager.register('search', search_hotkey, self.show_search_dialog)
-        # Alt+Y：全局热键，任何窗口下都可把最近一条剪贴板移动到「记忆」收藏夹
+        # Alt+Y：全局热键，模拟 Ctrl+C 复制选中文字并存入「记忆」收藏夹（适合普通窗口）
         self.hotkey_manager.register('memory', memory_hotkey, self.move_latest_clipboard_to_memory)
+        # Alt+D：全局热键，模拟鼠标右键点击复制选中内容并存入「记忆」收藏夹（适合终端）
+        self.hotkey_manager.register('terminal_memory', terminal_memory_hotkey, self.move_terminal_selection_to_memory)
         if (not ok_main or not ok_search) and hasattr(self, 'tray_icon'):
             self.tray_icon.showMessage(
                 "热键注册失败",
@@ -2598,48 +2648,139 @@ class ClipboardHistoryApp(QMainWindow):
         self.show_toast("成功把条目移动到记忆", 2000)
 
     def move_latest_clipboard_to_memory(self):
-        """全局热键(Alt+Y)回调：把最近一条剪贴板内容移动到「记忆」收藏夹。
+        """全局热键(Alt+Y)回调：模拟 Ctrl+C 复制当前选中的文字，并存入「记忆」收藏夹。
 
-        不依赖应用窗口是否聚焦/可见，移动后弹出 1 秒成功提示（居中于鼠标所在屏幕）。
+        任何窗口下均可用，不依赖应用是否聚焦/可见。流程：
+        1. 清空剪贴板，用于之后判断 Ctrl+C 是否真的复制到了内容；
+        2. 轮询等键盘上所有按键松开（Alt+Y 触发时按键仍被按住，立即发 Ctrl+C 会被当成组合键而失败）；
+        3. 用 pynput 模拟 Ctrl+C，再用 QTimer 让出事件循环，等目标程序写入剪贴板后读取。
+        成功 / 无选中 / 失败 均弹出持续 1 秒的提示。
+
+        注意：要让 Ctrl+C 作用于以管理员身份运行的程序(如 Cursor)，本程序也须提权，
+        否则会被 Windows 的 UIPI 机制拦截——启动时的 ensure_admin() 已处理。
         """
+        try:
+            # 清空剪贴板：若随后 Ctrl+C 没复制到内容，剪贴板仍为空 → 判定没有选中文字
+            self.clipboard.clear()
+
+            # 关键：Alt+Y 触发时按键仍被物理按住，此刻发 Ctrl+C 会被当成组合键而失败。
+            # 必须先等键盘上所有按键都松开，再模拟 Ctrl+C。
+            self._mem_wait_count = 0
+            self._wait_modifiers_up_then_copy()
+        except Exception as e:
+            self.show_toast(f"失败,{e}", 1000)
+
+    def _wait_modifiers_up_then_copy(self):
+        """轮询等待键盘上所有按键松开后，再模拟 Ctrl+C（最多等约 1.5 秒）。"""
+        self._mem_wait_count += 1
+        if _any_key_down() and self._mem_wait_count < 75:  # 75 * 20ms ≈ 1.5s 超时保护
+            QTimer.singleShot(20, self._wait_modifiers_up_then_copy)
+            return
+        self._do_copy_for_memory()
+
+    def _do_copy_for_memory(self):
+        """模拟 Ctrl+C，再让出事件循环等目标程序写入剪贴板后读取。"""
+        try:
+            try:
+                _admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
+            except Exception:
+                _admin = "?"
+            _mem_log(f"_do_copy: 本程序管理员={_admin}，模拟 Ctrl+C")
+            # 用 pynput（虚拟键码）模拟 Ctrl+C，比 keyboard 库的扫描码兼容性更好
+            kb = Controller()
+            kb.press(Key.ctrl)
+            kb.press('c')
+            kb.release('c')
+            kb.release(Key.ctrl)
+            QTimer.singleShot(250, self._save_selection_to_memory)
+        except Exception as e:
+            self.show_toast(f"失败,{e}", 1000)
+
+    def _save_selection_to_memory(self):
+        """move_latest_clipboard_to_memory 的延迟回调：读取 Ctrl+C 复制到的选中文字并存入记忆夹。"""
         MEMORY_FOLDER = "记忆"
 
-        # 取最近一条：历史记录开头即最新；为空则回退到当前剪贴板文本
-        if self.clipboard_history:
-            text = self.clipboard_history[0]
-        else:
+        try:
             text = self.clipboard.text()
-        if not text:
-            self.show_toast("剪贴板为空，移动失败", 1000)
-            return
+            win_text = _win_clipboard_text()
+            _mem_log(f"_save: 读取剪贴板 Qt={text!r} Win={win_text!r}")
 
-        # 确保「记忆」收藏夹存在；不存在则创建并加入下拉菜单
-        if MEMORY_FOLDER not in self.favorites:
-            self.favorites[MEMORY_FOLDER] = []
-            if self.folder_combo.findText(MEMORY_FOLDER) == -1:
-                self.folder_combo.addItem(MEMORY_FOLDER)
+            # Qt 偶尔读不到他进程刚写入的内容，用 Windows API 的结果兜底
+            if not text and win_text:
+                text = win_text
 
-        # 若记忆夹中已存在相同文本的条目，则提示并放弃移动
-        for item in self.favorites[MEMORY_FOLDER]:
-            existing_text = item["text"] if isinstance(item, dict) else str(item)
-            if existing_text == text:
-                self.show_toast("条目已存在，移动失败", 1000)
+            # 剪贴板被清空后仍为空，说明 Ctrl+C 没复制到东西，即没有选中文字
+            if not text:
+                self.show_toast("没有选中的文字", 1000)
                 return
 
-        # 以字典格式加入记忆夹
-        self.favorites[MEMORY_FOLDER].append({"text": text, "description": ""})
+            # 确保「记忆」收藏夹存在；不存在则创建并加入下拉菜单
+            if MEMORY_FOLDER not in self.favorites:
+                self.favorites[MEMORY_FOLDER] = []
+                if self.folder_combo.findText(MEMORY_FOLDER) == -1:
+                    self.folder_combo.addItem(MEMORY_FOLDER)
 
-        # 若当前正显示「记忆」收藏夹，同步刷新其列表显示
-        if self.current_folder == MEMORY_FOLDER:
-            truncated_text = self.truncate_text(text)
-            self.favorites_list.addItem(truncated_text)
-            self.update_list_numbers(self.favorites_list)
+            # 若记忆夹中已存在相同文本的条目，则视为失败并提示原因
+            for item in self.favorites[MEMORY_FOLDER]:
+                existing_text = item["text"] if isinstance(item, dict) else str(item)
+                if existing_text == text:
+                    self.show_toast("失败,记忆文件夹中已存在相同条目", 1000)
+                    return
 
-        # 保存更改（本地 + 云端同步由 save_favorites 处理）
-        self.save_favorites()
+            # 以字典格式加入记忆夹
+            self.favorites[MEMORY_FOLDER].append({"text": text, "description": ""})
 
-        # 弹出 1 秒后自动消失的成功提示
-        self.show_toast("移动最近一条剪贴板到记忆文件夹成功", 1000)
+            # 若当前正显示「记忆」收藏夹，同步刷新其列表显示
+            if self.current_folder == MEMORY_FOLDER:
+                truncated_text = self.truncate_text(text)
+                self.favorites_list.addItem(truncated_text)
+                self.update_list_numbers(self.favorites_list)
+
+            # 保存更改（本地 + 云端同步由 save_favorites 处理）
+            self.save_favorites()
+
+            # 弹出 1 秒后自动消失的成功提示
+            self.show_toast("成功地将选中文字复制到记忆文件夹", 1000)
+        except Exception as e:
+            self.show_toast(f"失败,{e}", 1000)
+
+    def move_terminal_selection_to_memory(self):
+        """全局热键(Alt+D)回调：模拟鼠标右键点击复制终端选中内容，并存入「记忆」收藏夹。
+
+        终端(开启快速编辑模式的控制台)里 Ctrl+C 是“中断”而非“复制”，但选中文字后
+        右键点击会把选中内容复制到剪贴板。流程与 Alt+Y 一致，只是把模拟 Ctrl+C 换成
+        在鼠标当前位置模拟一次右键单击。
+        """
+        try:
+            # 清空剪贴板：若右键点击没复制到内容，剪贴板仍为空 → 判定没有选中文字
+            self.clipboard.clear()
+
+            # Alt+D 触发时按键仍被物理按住，先等所有按键松开再模拟右键
+            self._mem_wait_count = 0
+            self._wait_keys_up_then_right_click()
+        except Exception as e:
+            self.show_toast(f"失败,{e}", 1000)
+
+    def _wait_keys_up_then_right_click(self):
+        """轮询等待键盘上所有按键松开后，再模拟鼠标右键点击（最多等约 1.5 秒）。"""
+        self._mem_wait_count += 1
+        if _any_key_down() and self._mem_wait_count < 75:  # 75 * 20ms ≈ 1.5s 超时保护
+            QTimer.singleShot(20, self._wait_keys_up_then_right_click)
+            return
+        self._do_right_click_for_memory()
+
+    def _do_right_click_for_memory(self):
+        """在鼠标当前位置模拟一次右键单击，再让出事件循环等剪贴板更新后读取。"""
+        try:
+            MOUSEEVENTF_RIGHTDOWN = 0x0008
+            MOUSEEVENTF_RIGHTUP = 0x0010
+            u = ctypes.windll.user32
+            u.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
+            u.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
+            # 复用 Alt+Y 的读取/保存逻辑
+            QTimer.singleShot(250, self._save_selection_to_memory)
+        except Exception as e:
+            self.show_toast(f"失败,{e}", 1000)
 
     def change_folder(self, folder_name):
         """切换当前收藏夹"""
@@ -3013,7 +3154,57 @@ def get_app_icon():
             return QIcon(path)
     return QIcon()
 
+def ensure_admin():
+    """若本进程未提权，则以管理员身份重新启动自身（弹 UAC）。
+
+    模拟按键(Alt+Y 的 Ctrl+C)若要作用于以管理员身份运行的程序(如 Cursor)，
+    本程序必须同样提权，否则会被 Windows 的 UIPI 机制拦截。
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception as e:
+        _mem_log(f"ensure_admin: IsUserAnAdmin 异常 {e}")
+        return
+
+    _mem_log(f"ensure_admin: 启动，当前管理员={is_admin}, frozen={getattr(sys, 'frozen', False)}, exe={sys.executable}")
+    if is_admin:
+        return  # 已是管理员，无需处理
+
+    try:
+        import subprocess
+        if getattr(sys, 'frozen', False):
+            # 打包后的 exe：直接重启自身
+            exe = sys.executable
+            params = subprocess.list2cmdline(sys.argv[1:])
+        else:
+            # 源码运行：用 python 解释器重新执行本脚本
+            exe = sys.executable
+            params = subprocess.list2cmdline([os.path.abspath(__file__)] + sys.argv[1:])
+
+        # "runas" 触发 UAC 提权；成功则退出当前未提权实例
+        ret = ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, params, None, 1)
+        _mem_log(f"ensure_admin: ShellExecuteW 返回 {ret} (>32 表示已启动提权实例)")
+        if ret > 32:
+            sys.exit(0)
+    except Exception as e:
+        _mem_log(f"ensure_admin: 请求管理员权限失败 {e}")
+        print(f"请求管理员权限失败: {e}")
+
+
 def main():
+    # 先尝试以管理员身份运行，确保模拟按键能作用于管理员程序
+    ensure_admin()
+
+    # 忽略 SIGINT：本程序会模拟 Ctrl+C，若此刻焦点在控制台/终端上，
+    # Ctrl+C 会被当成中断信号发给本进程导致退出。忽略它即可避免被自己误杀。
+    try:
+        import signal
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+    except Exception as e:
+        print(f"设置 SIGINT 忽略失败: {e}")
+
     # 在 Windows 上设置 AppUserModelID, 让任务栏把本应用识别为独立应用,
     # 否则会沿用 python.exe 的图标
     if sys.platform == "win32":
