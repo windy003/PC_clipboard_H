@@ -7,7 +7,14 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
+import android.os.Build
+import android.os.Bundle
 import android.os.SystemClock
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
+import android.util.TypedValue
 import android.view.View
 import android.widget.RemoteViews
 import kotlin.concurrent.thread
@@ -27,8 +34,7 @@ import kotlin.concurrent.thread
 class MemoryWidgetProvider : AppWidgetProvider() {
 
     override fun onEnabled(context: Context) {
-        // 第一个小部件被添加：启动每分钟的定时检查
-        scheduleAlarm(context)
+        // 第一个小部件被添加：立即检查一次（检查完成后会自动排下一次闹钟）
         refreshCount(context)
     }
 
@@ -38,19 +44,29 @@ class MemoryWidgetProvider : AppWidgetProvider() {
     }
 
     override fun onUpdate(context: Context, mgr: AppWidgetManager, ids: IntArray) {
-        // 系统周期更新（兜底，约 30 分钟一次，也用于重启后自愈）：确保闹钟在跑并刷新
-        scheduleAlarm(context)
+        // 系统周期更新（兜底，约 30 分钟一次，也用于重启后自愈）：刷新并重排闹钟链
         refreshCount(context)
     }
 
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        if (intent.action == ACTION_REFRESH) {
-            refreshCount(context)
+        when (intent.action) {
+            ACTION_REFRESH -> refreshCount(context)          // 闹钟/自身触发：后台拉取
+            ACTION_REDRAW -> updateAllWidgets(context)        // App 已写入数据：只重绘
         }
     }
 
-    /** 后台拉取「记忆」条目数，写入缓存后刷新所有小部件实例。 */
+    override fun onAppWidgetOptionsChanged(
+        context: Context,
+        mgr: AppWidgetManager,
+        id: Int,
+        newOptions: Bundle
+    ) {
+        // 用户调整小部件大小后，按新高度重新计算字号并重绘
+        updateAllWidgets(context)
+    }
+
+    /** 后台拉取「记忆」条目数，写入缓存后刷新所有小部件实例，并排下一次闹钟。 */
     private fun refreshCount(context: Context) {
         val pending = goAsync()
         thread {
@@ -62,18 +78,23 @@ class MemoryWidgetProvider : AppWidgetProvider() {
                 val loggedIn = url.isNotEmpty() && token.isNotEmpty() &&
                     System.currentTimeMillis() / 1000 < exp - 60
                 if (loggedIn) {
-                    val infos = ClipboardApi.listFolders(url, token)
-                    val count = infos.firstOrNull { it.name == MEMORY_FOLDER }?.count ?: 0
-                    // 仅在成功时更新条目数与“上次检查时间”
-                    prefs.edit()
-                        .putInt(KEY_WIDGET_COUNT, count)
-                        .putLong(KEY_WIDGET_TIME, System.currentTimeMillis())
-                        .apply()
+                    val now = System.currentTimeMillis()
+                    try {
+                        val infos = ClipboardApi.listFolders(url, token)
+                        val count = infos.firstOrNull { it.name == MEMORY_FOLDER }?.count ?: 0
+                        // 成功：更新条目数与“上次检查时间”（计时器归零）
+                        prefs.edit()
+                            .putInt(KEY_WIDGET_COUNT, count)
+                            .putLong(KEY_WIDGET_TIME, now)
+                            .apply()
+                    } catch (e: Exception) {
+                        // 网络失败：条目数保留上次，但仍记一次“检查时间”让计时器归零
+                        prefs.edit().putLong(KEY_WIDGET_TIME, now).apply()
+                    }
                 }
-            } catch (e: Exception) {
-                // 网络失败/未登录：保留上次缓存，仅刷新“分钟前”显示
             } finally {
                 updateAllWidgets(context)
+                scheduleNextAlarm(context)   // 链式排下一次检查
                 pending.finish()
             }
         }
@@ -99,29 +120,103 @@ class MemoryWidgetProvider : AppWidgetProvider() {
         for (id in ids) {
             val views = RemoteViews(context.packageName, R.layout.memory_widget)
             views.setTextViewText(R.id.widget_title, "d1剪贴板")
-            views.setTextViewText(R.id.widget_count, countText)
+            // 第二行：数字红色、“个”绿色
+            views.setTextViewText(R.id.widget_count, colorizeCount(countText))
 
+            val thirdText: String
             if (hasData) {
                 // 第三行：用 Chronometer 实时跳动显示“距上次检查过了多久”。
                 // base 用 elapsedRealtime 基准：把上次检查的墙钟时刻换算成对应的开机计时，
                 // 这样桌面会每秒自动 +1；每次成功检查后 lastTime 更新，秒数自动归零重新计。
+                // 格式只用 "%s"（不含“前”），时间为红色；“前”由旁边的蓝色 widget_suffix 显示。
                 val elapsed = System.currentTimeMillis() - lastTime
                 val base = SystemClock.elapsedRealtime() - elapsed
-                views.setChronometer(R.id.widget_chrono, base, "%s前", true)
-                views.setViewVisibility(R.id.widget_chrono, View.VISIBLE)
+                views.setChronometer(R.id.widget_chrono, base, "%s", true)
+                views.setViewVisibility(R.id.widget_chrono_row, View.VISIBLE)
                 views.setViewVisibility(R.id.widget_status, View.GONE)
+                thirdText = "00:00前"   // 用于按宽度估算字号（取较常见的长度）
             } else {
-                // 还没有任何数据：停掉计时器，显示占位文字
+                // 还没有任何数据：隐藏计时器行，显示占位文字
+                val status = if (loggedIn) "等待检查" else "未登录"
                 views.setChronometer(R.id.widget_chrono, SystemClock.elapsedRealtime(), null, false)
-                views.setViewVisibility(R.id.widget_chrono, View.GONE)
+                views.setViewVisibility(R.id.widget_chrono_row, View.GONE)
                 views.setViewVisibility(R.id.widget_status, View.VISIBLE)
-                views.setTextViewText(R.id.widget_status, if (loggedIn) "等待检查" else "未登录")
+                views.setTextViewText(R.id.widget_status, status)
+                thirdText = status
             }
+
+            // 测量小部件宽高，每行字号取 min(行高, 宽度可容纳)，尽量大且不溢出
+            applyRowHeightSizes(views, mgr, id, "d1剪贴板", countText, thirdText)
 
             // 点击整块小部件打开 App 主页
             views.setOnClickPendingIntent(R.id.widget_root, openAppPendingIntent(context))
             mgr.updateAppWidget(id, views)
         }
+    }
+
+    /**
+     * 测量小部件宽高（dp），分成 3 行。每行字号 = min(行高, 该行文字按宽度能容纳的最大字号)，
+     * 既让文字尽量大填满高度，又保证每行文字宽度不超过小部件宽度（不溢出/不截断）。
+     */
+    private fun applyRowHeightSizes(
+        views: RemoteViews,
+        mgr: AppWidgetManager,
+        id: Int,
+        titleText: String,
+        countText: String,
+        thirdText: String
+    ) {
+        val opts = mgr.getAppWidgetOptions(id)
+        // 竖屏当前高≈MAX_HEIGHT、宽≈MIN_WIDTH；用 MIN_WIDTH 作宽度保证两种朝向都不溢出
+        val hMax = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0)
+        val hMin = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0)
+        val heightDp = maxOf(hMax, hMin).let { if (it > 0) it else 110 }
+        val wMin = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0)
+        val widthDp = (if (wMin > 0) wMin else 60).toFloat() - 4f  // 减去内边距余量
+
+        // 行高（字号上限）：总高 / 3，取 0.9 留行间余量
+        val rowSize = heightDp / 3f * 0.9f
+
+        // 估算一段文字在字号 S 时的宽度 ≈ S × 字符当量总和，反推不溢出时的最大字号
+        fun fitByWidth(text: String): Float {
+            var units = 0f
+            for (c in text) {
+                units += when {
+                    c.code >= 0x2E80 -> 1.0f          // 中文/全角
+                    c in '0'..'9' -> 0.58f            // 数字
+                    c == ':' || c == '.' || c == ' ' -> 0.32f
+                    else -> 0.6f                       // 其它半角字符
+                }
+            }
+            if (units < 0.5f) units = 0.5f
+            return widthDp / units
+        }
+
+        fun sizeFor(text: String) = minOf(rowSize, fitByWidth(text))
+
+        views.setTextViewTextSize(R.id.widget_title, TypedValue.COMPLEX_UNIT_DIP, sizeFor(titleText))
+        views.setTextViewTextSize(R.id.widget_count, TypedValue.COMPLEX_UNIT_DIP, sizeFor(countText))
+        // 第三行：计时器和“前”用同一字号（按整段 "00:00前" 估算宽度），保持视觉一致
+        val thirdSize = sizeFor(thirdText)
+        views.setTextViewTextSize(R.id.widget_chrono, TypedValue.COMPLEX_UNIT_DIP, thirdSize)
+        views.setTextViewTextSize(R.id.widget_suffix, TypedValue.COMPLEX_UNIT_DIP, thirdSize)
+        views.setTextViewTextSize(R.id.widget_status, TypedValue.COMPLEX_UNIT_DIP, thirdSize)
+    }
+
+    /** 把 "N个" 着色为：数字红色、“个”绿色；非该格式（如“未登录”）则整体红色。 */
+    private fun colorizeCount(text: String): CharSequence {
+        val sp = SpannableString(text)
+        if (text.endsWith("个") && text.length >= 2) {
+            val splitAt = text.length - 1
+            sp.setSpan(ForegroundColorSpan(Color.parseColor("#F44336")), 0, splitAt,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)                     // 数字红
+            sp.setSpan(ForegroundColorSpan(Color.parseColor("#4CAF50")), splitAt, text.length,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)                     // “个”绿
+        } else {
+            sp.setSpan(ForegroundColorSpan(Color.parseColor("#F44336")), 0, text.length,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        return sp
     }
 
     /** 点击小部件打开 App 主页。 */
@@ -140,15 +235,27 @@ class MemoryWidgetProvider : AppWidgetProvider() {
         return PendingIntent.getBroadcast(context, 0, intent, flags)
     }
 
-    private fun scheduleAlarm(context: Context) {
+    /**
+     * 排下一次（60 秒后）的一次性闹钟。每次检查完成后再排下一次，比 setRepeating
+     * 的批处理更准时。尽量用“精确 + 允许 Doze”模式；无精确闹钟权限时退回允许 Doze 的非精确闹钟。
+     */
+    private fun scheduleNextAlarm(context: Context) {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        // 用不精确的可重复闹钟，每 60 秒触发一次（系统可能小幅批处理，足够使用）
-        am.setRepeating(
-            AlarmManager.ELAPSED_REALTIME_WAKEUP,
-            SystemClock.elapsedRealtime() + INTERVAL_MS,
-            INTERVAL_MS,
-            refreshPendingIntent(context)
-        )
+        val triggerAt = SystemClock.elapsedRealtime() + INTERVAL_MS
+        val pi = refreshPendingIntent(context)
+        try {
+            when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !am.canScheduleExactAlarms() ->
+                    am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi)
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ->
+                    am.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi)
+                else ->
+                    am.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi)
+            }
+        } catch (e: SecurityException) {
+            // 某些系统对精确闹钟有限制：退回允许 Doze 的非精确闹钟
+            am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi)
+        }
     }
 
     private fun cancelAlarm(context: Context) {
@@ -158,6 +265,7 @@ class MemoryWidgetProvider : AppWidgetProvider() {
 
     companion object {
         private const val ACTION_REFRESH = "com.example.clipboardviewer.WIDGET_REFRESH"
+        private const val ACTION_REDRAW = "com.example.clipboardviewer.WIDGET_REDRAW"
         private const val INTERVAL_MS = 60_000L   // 每分钟检查一次
 
         // 与 MainActivity 共用的登录态
@@ -166,6 +274,21 @@ class MemoryWidgetProvider : AppWidgetProvider() {
         private const val KEY_TOKEN = "token"
         private const val KEY_EXP = "expires_at"
         private const val MEMORY_FOLDER = "记忆"
+
+        /**
+         * 供主界面刷新时调用：写入最新「记忆」条目数与当前时间（计时器归零），
+         * 并立即重绘小部件（不再触发后台网络请求）。
+         */
+        fun pushCountFromApp(context: Context, memoryCount: Int) {
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                .putInt(KEY_WIDGET_COUNT, memoryCount)
+                .putLong(KEY_WIDGET_TIME, System.currentTimeMillis())
+                .apply()
+            val intent = Intent(context, MemoryWidgetProvider::class.java).apply {
+                action = ACTION_REDRAW
+            }
+            context.sendBroadcast(intent)
+        }
 
         // 小部件自身的缓存
         private const val KEY_WIDGET_COUNT = "widget_memory_count"

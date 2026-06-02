@@ -128,6 +128,11 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             try {
                 val infos = withContext(Dispatchers.IO) { ClipboardApi.listFolders(url, token) }
+
+                // 把「记忆」条目数推送到桌面小部件，并让其计时器归零
+                val memoryCount = infos.firstOrNull { it.name == DEFAULT_FOLDER }?.count ?: 0
+                MemoryWidgetProvider.pushCountFromApp(this@MainActivity, memoryCount)
+
                 val displays = mutableListOf<String>()
                 val keys = mutableListOf<String?>()
                 var total = 0

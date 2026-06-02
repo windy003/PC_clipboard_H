@@ -1,61 +1,84 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 1×1（一个图标大小）小部件：三行 d1剪贴板 / 条目数 / 距上次检查时间。整块可点击立即刷新。
-     字体已压小以塞进单个图标尺寸。 -->
+<!-- 小部件：三行 d1剪贴板 / 条目数 / 距上次检查。
+     字号在代码里按"小部件高度 ÷ 3 = 每行高度"动态设置。
+     第二行"个"绿色、第三行时间红色、"前"蓝色（颜色在布局/代码里设置）。 -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:gravity="center"
     android:background="@drawable/memory_widget_bg"
-    android:padding="2dp">
+    android:padding="1dp">
 
     <!-- 第一行：标题（橙色） -->
     <TextView
         android:id="@+id/widget_title"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
         android:text="d1剪贴板"
         android:textColor="#FF9800"
-        android:textSize="8sp"
         android:textStyle="bold"
         android:maxLines="1"
-        android:includeFontPadding="false" />
+        android:includeFontPadding="false"
+        android:textSize="14sp" />
 
-    <!-- 第二行：条目数（红色） -->
+    <!-- 第二行：条目数（数字红色 + “个”绿色，由代码用 Span 着色） -->
     <TextView
         android:id="@+id/widget_count"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
         android:text="…"
         android:textColor="#F44336"
-        android:textSize="18sp"
         android:textStyle="bold"
         android:maxLines="1"
-        android:includeFontPadding="false" />
+        android:includeFontPadding="false"
+        android:textSize="22sp" />
 
-    <!-- 第三行：距上次检查的实时秒数（绿色，由桌面每秒自动跳动） -->
-    <Chronometer
-        android:id="@+id/widget_chrono"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textColor="#4CAF50"
-        android:textSize="8sp"
-        android:gravity="center"
-        android:maxLines="1"
-        android:includeFontPadding="false" />
+    <!-- 第三行（有数据）：计时器(红) + “前”(蓝)，横向居中 -->
+    <LinearLayout
+        android:id="@+id/widget_chrono_row"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:gravity="center">
 
-    <!-- 无数据时的占位文字（与 Chronometer 互斥显示） -->
+        <Chronometer
+            android:id="@+id/widget_chrono"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#F44336"
+            android:maxLines="1"
+            android:includeFontPadding="false"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/widget_suffix"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="前"
+            android:textColor="#2196F3"
+            android:maxLines="1"
+            android:includeFontPadding="false"
+            android:textSize="12sp" />
+    </LinearLayout>
+
+    <!-- 第三行（无数据）：占位文字（与计时器行互斥显示） -->
     <TextView
         android:id="@+id/widget_status"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center"
         android:text="等待检查"
         android:textColor="#4CAF50"
-        android:textSize="7sp"
-        android:gravity="center"
         android:maxLines="1"
         android:visibility="gone"
-        android:includeFontPadding="false" />
+        android:includeFontPadding="false"
+        android:textSize="12sp" />
 
 </LinearLayout>
