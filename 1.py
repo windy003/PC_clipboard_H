@@ -1845,6 +1845,14 @@ class ClipboardHistoryApp(QMainWindow):
         search_hotkey_action = tray_menu.addAction("重新设置搜索快捷键")
         search_hotkey_action.triggered.connect(self.show_search_hotkey_settings)
 
+        # 设置普通界面复制文本并移到记忆快捷键（模拟 Ctrl+C）
+        memory_hotkey_action = tray_menu.addAction("设置普通界面复制文本并移到记忆快捷键")
+        memory_hotkey_action.triggered.connect(self.show_memory_hotkey_settings)
+
+        # 设置终端界面复制文本并移到记忆快捷键（模拟鼠标右键）
+        terminal_memory_hotkey_action = tray_menu.addAction("设置终端界面复制文本并移到记忆快捷键")
+        terminal_memory_hotkey_action.triggered.connect(self.show_terminal_memory_hotkey_settings)
+
         self.delete_history = []
 
         # 添加分隔线
@@ -2500,6 +2508,34 @@ class ClipboardHistoryApp(QMainWindow):
                 # 重新注册搜索热键
                 if self.hotkey_manager.register('search', new_hotkey, self.show_search_dialog):
                     QMessageBox.information(self, "设置成功", f"搜索快捷键已更改为: {new_hotkey}")
+                else:
+                    QMessageBox.warning(self, "设置失败", f"快捷键 {new_hotkey} 注册失败，可能被其它程序占用，请更换组合。")
+
+    def show_memory_hotkey_settings(self):
+        """设置普通界面复制文本并移到记忆的快捷键（模拟 Ctrl+C）"""
+        dialog = HotkeySettingDialog(self, self.config.get('memory_hotkey', 'alt+y'))
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_hotkey = dialog.new_hotkey
+            if new_hotkey != self.config.get('memory_hotkey', 'alt+y'):
+                self.config['memory_hotkey'] = new_hotkey
+                self.save_config()
+                # 重新注册记忆热键
+                if self.hotkey_manager.register('memory', new_hotkey, self.move_latest_clipboard_to_memory):
+                    QMessageBox.information(self, "设置成功", f"普通界面复制到记忆快捷键已更改为: {new_hotkey}")
+                else:
+                    QMessageBox.warning(self, "设置失败", f"快捷键 {new_hotkey} 注册失败，可能被其它程序占用，请更换组合。")
+
+    def show_terminal_memory_hotkey_settings(self):
+        """设置终端界面复制文本并移到记忆的快捷键（模拟鼠标右键）"""
+        dialog = HotkeySettingDialog(self, self.config.get('terminal_memory_hotkey', 'alt+d'))
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            new_hotkey = dialog.new_hotkey
+            if new_hotkey != self.config.get('terminal_memory_hotkey', 'alt+d'):
+                self.config['terminal_memory_hotkey'] = new_hotkey
+                self.save_config()
+                # 重新注册终端记忆热键
+                if self.hotkey_manager.register('terminal_memory', new_hotkey, self.move_terminal_selection_to_memory):
+                    QMessageBox.information(self, "设置成功", f"终端界面复制到记忆快捷键已更改为: {new_hotkey}")
                 else:
                     QMessageBox.warning(self, "设置失败", f"快捷键 {new_hotkey} 注册失败，可能被其它程序占用，请更换组合。")
 

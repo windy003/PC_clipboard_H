@@ -1,0 +1,6 @@
+{
+  "hotkey": "ctrl+windows+a",
+  "search_hotkey": "ctrl+alt+a",
+  "memory_hotkey": "alt+ctrl+j+shift",
+  "terminal_memory_hotkey": "ctrl+j+shift+windows"
+}
