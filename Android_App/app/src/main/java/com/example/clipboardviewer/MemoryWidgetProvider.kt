@@ -174,8 +174,9 @@ class MemoryWidgetProvider : AppWidgetProvider() {
         val wMin = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0)
         val widthDp = (if (wMin > 0) wMin else 60).toFloat() - 4f  // 减去内边距余量
 
-        // 行高（字号上限）：总高 / 3，取 0.9 留行间余量
-        val rowSize = heightDp / 3f * 0.9f
+        // 行高（字号上限）：总高 / 3。单行文字实际占高 ≈ 字号 ×1.2，
+        // 故取 0.78 留出行高余量，避免文字底部被裁切。
+        val rowSize = heightDp / 3f * 0.78f
 
         // 估算一段文字在字号 S 时的宽度 ≈ S × 字符当量总和，反推不溢出时的最大字号
         fun fitByWidth(text: String): Float {
