@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 1×1（一个图标大小）小部件：三行 d1剪贴板 / 条目数 / 距上次检查时间。整块可点击立即刷新。
+     字体已压小以塞进单个图标尺寸。 -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:background="@drawable/memory_widget_bg"
+    android:padding="2dp">
+
+    <!-- 第一行：标题（橙色） -->
+    <TextView
+        android:id="@+id/widget_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="d1剪贴板"
+        android:textColor="#FF9800"
+        android:textSize="8sp"
+        android:textStyle="bold"
+        android:maxLines="1"
+        android:includeFontPadding="false" />
+
+    <!-- 第二行：条目数（红色） -->
+    <TextView
+        android:id="@+id/widget_count"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="…"
+        android:textColor="#F44336"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:maxLines="1"
+        android:includeFontPadding="false" />
+
+    <!-- 第三行：距上次检查的实时秒数（绿色，由桌面每秒自动跳动） -->
+    <Chronometer
+        android:id="@+id/widget_chrono"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:textColor="#4CAF50"
+        android:textSize="8sp"
+        android:gravity="center"
+        android:maxLines="1"
+        android:includeFontPadding="false" />
+
+    <!-- 无数据时的占位文字（与 Chronometer 互斥显示） -->
+    <TextView
+        android:id="@+id/widget_status"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="等待检查"
+        android:textColor="#4CAF50"
+        android:textSize="7sp"
+        android:gravity="center"
+        android:maxLines="1"
+        android:visibility="gone"
+        android:includeFontPadding="false" />
+
+</LinearLayout>

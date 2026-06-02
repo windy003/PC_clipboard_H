@@ -18,5 +18,19 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 「记忆」条目数小部件 -->
+        <receiver
+            android:name=".MemoryWidgetProvider"
+            android:label="d1剪贴板记忆"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.example.clipboardviewer.WIDGET_REFRESH" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/memory_widget_info" />
+        </receiver>
     </application>
 </manifest>
