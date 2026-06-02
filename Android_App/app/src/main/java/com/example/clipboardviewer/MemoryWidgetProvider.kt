@@ -118,10 +118,19 @@ class MemoryWidgetProvider : AppWidgetProvider() {
                 views.setTextViewText(R.id.widget_status, if (loggedIn) "等待检查" else "未登录")
             }
 
-            // 点击整块小部件立即刷新
-            views.setOnClickPendingIntent(R.id.widget_root, refreshPendingIntent(context))
+            // 点击整块小部件打开 App 主页
+            views.setOnClickPendingIntent(R.id.widget_root, openAppPendingIntent(context))
             mgr.updateAppWidget(id, views)
         }
+    }
+
+    /** 点击小部件打开 App 主页。 */
+    private fun openAppPendingIntent(context: Context): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        return PendingIntent.getActivity(context, 0, intent, flags)
     }
 
     // ---------- 定时器 ----------
