@@ -1449,6 +1449,28 @@ class LoginDialog(QDialog):
             QMessageBox.critical(self, "登录失败", str(e))
 
 
+class CloudCountWorker(QThread):
+    """后台线程：从云端读取指定收藏夹的条目数，完成后用信号回传到主线程。
+
+    放后台是为了不阻塞 UI（网络请求可能耗时），且不改动主界面的 self.favorites。
+    """
+    finished_count = pyqtSignal(int, bool)  # (条目数, 是否成功)
+
+    def __init__(self, d1, folder, parent=None):
+        super().__init__(parent)
+        self.d1 = d1
+        self.folder = folder
+
+    def run(self):
+        try:
+            favorites = self.d1.load()
+            count = len(favorites.get(self.folder, []))
+            self.finished_count.emit(count, True)
+        except Exception as e:
+            print(f"云端读取「{self.folder}」条目数失败: {e}")
+            self.finished_count.emit(0, False)
+
+
 class ClipboardHistoryApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1589,9 +1611,6 @@ class ClipboardHistoryApp(QMainWindow):
         folder_layout.addWidget(self.delete_folder_btn)
         top_layout.addLayout(folder_layout)
         
-        # 存储收藏夹数据
-        self.favorites_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.clipboard_favorites.json')
-
         # 初始化云端收藏夹同步（经 Cloudflare Worker；配置从同目录 .env 或系统环境变量读取）
         load_env_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
         self.d1 = D1Storage.from_env()
@@ -1887,8 +1906,10 @@ class ClipboardHistoryApp(QMainWindow):
         """创建第二个托盘图标，用数字显示「记忆」收藏夹的条目数，每分钟刷新。"""
         self.count_tray_icon = QSystemTrayIcon(self)
 
-        # 右键菜单：显示主窗口 / 退出
+        # 右键菜单：刷新 / 显示主窗口 / 退出
         menu = QMenu()
+        refresh_action = menu.addAction("刷新(&S)")  # 快捷键 S：手动刷新数据
+        refresh_action.triggered.connect(self.refresh_memory_count)
         show_action = menu.addAction("显示主窗口")
         show_action.triggered.connect(self.show_window)
         menu.addSeparator()
@@ -1900,17 +1921,57 @@ class ClipboardHistoryApp(QMainWindow):
         self.count_tray_icon.activated.connect(self.tray_icon_activated)
         self.count_tray_icon.show()
 
-        # 立即刷新一次，并每分钟刷新一次
+        # 先用本地数据立即显示一个数字，随后从云端拉取覆盖
         self.update_memory_count_icon()
+        self.fetch_cloud_memory_count()
+
+        # 每分钟从云端刷新一次
         self.count_timer = QTimer(self)
-        self.count_timer.timeout.connect(self.update_memory_count_icon)
+        self.count_timer.timeout.connect(self.fetch_cloud_memory_count)
         self.count_timer.start(60000)  # 60 秒
 
-    def update_memory_count_icon(self):
-        """刷新「记忆」条目数托盘图标及其提示。"""
-        count = len(self.favorites.get("记忆", []))
+    def update_memory_count_icon(self, count=None):
+        """刷新「记忆」条目数托盘图标及其提示；count 为 None 时用本地数据。"""
+        if count is None:
+            count = len(self.favorites.get("记忆", []))
         self.count_tray_icon.setIcon(self.render_count_icon(count))
         self.count_tray_icon.setToolTip(f"记忆文件夹：{count} 条目")
+
+    def fetch_cloud_memory_count(self):
+        """每分钟回调：在后台线程从云端读取「记忆」条目数并更新图标。
+
+        未配置云端或未登录时回退到本地数据；上一个查询还在进行时跳过本次。
+        """
+        if not (self.d1.enabled and self.d1.has_valid_token()):
+            self.update_memory_count_icon()  # 回退本地
+            return
+        worker = getattr(self, '_count_worker', None)
+        if worker is not None and worker.isRunning():
+            return  # 避免并发重复请求
+        self._count_worker = CloudCountWorker(self.d1, "记忆", self)
+        self._count_worker.finished_count.connect(self._on_cloud_count)
+        self._count_worker.start()
+
+    def _on_cloud_count(self, count, ok):
+        """云端查询结果回到主线程：成功用云端数，失败回退本地。"""
+        if ok:
+            self.update_memory_count_icon(count)
+        else:
+            self.update_memory_count_icon()
+
+    def refresh_memory_count(self):
+        """托盘右键「刷新(S)」：立即从云端读取「记忆」条目数并更新图标。"""
+        if self.d1.enabled and self.d1.has_valid_token():
+            self.fetch_cloud_memory_count()
+            self.count_tray_icon.showMessage(
+                "正在刷新", "正在从云端读取记忆文件夹条目数…",
+                QSystemTrayIcon.MessageIcon.Information, 1500)
+        else:
+            self.update_memory_count_icon()
+            count = len(self.favorites.get("记忆", []))
+            self.count_tray_icon.showMessage(
+                "刷新完成（本地）", f"记忆文件夹：{count} 条目（未登录云端）",
+                QSystemTrayIcon.MessageIcon.Information, 2000)
 
     def render_count_icon(self, count):
         """把条目数画成一个方底白字、尽量占满的托盘图标。"""
@@ -2319,30 +2380,6 @@ class ClipboardHistoryApp(QMainWindow):
                     self.move_to_folder_from_history(current_item, action.text())
     
 
-    def _parse_favorites_file(self):
-        """从本地文件解析收藏夹数据，返回字典；无文件或出错返回 None。"""
-        if not os.path.exists(self.favorites_file):
-            return None
-        with open(self.favorites_file, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
-        favorites = {}
-        # 处理旧格式数据（简单列表）
-        if isinstance(data, list):
-            favorites = {
-                "默认收藏夹": [{"text": item, "description": ""} for item in data]
-            }
-        # 新格式数据（字典格式）
-        elif isinstance(data, dict):
-            for folder, items in data.items():
-                favorites[folder] = []
-                for item in items:
-                    if isinstance(item, str):
-                        favorites[folder].append({"text": item, "description": ""})
-                    else:
-                        favorites[folder].append(item)
-        return favorites
-
     def _apply_loaded_favorites(self, favorites):
         """把加载到的收藏夹数据应用到界面。"""
         self.favorites = favorites or {}
@@ -2366,69 +2403,34 @@ class ClipboardHistoryApp(QMainWindow):
         self.update_list_numbers(self.favorites_list)
 
     def load_favorites(self):
-        """加载收藏记录。
+        """只从云端加载收藏记录（不使用本地文件）。
 
-        优先从 Cloudflare D1 读取（作为数据源）；若 D1 为空但本地有数据，
-        则把本地数据迁移上传到 D1；若 D1 未配置或不可用，则回退到本地文件。
+        加载成功才置 _cloud_ready=True；未配置/未登录/网络失败时收藏夹为空，
+        且 _cloud_ready 保持 False —— 以此避免后续用空数据覆盖云端。
         """
-        # 1) 尝试从云端读取（需已登录）
-        if self.d1.enabled and self.d1.has_valid_token():
-            try:
-                d1_favorites = self.d1.load()
-                if d1_favorites:
-                    # D1 已有数据，作为数据源
-                    self._apply_loaded_favorites(d1_favorites)
-                    # 同步一份到本地文件作为离线缓存
-                    self._write_favorites_file()
-                    print("已从 Cloudflare D1 加载收藏夹")
-                    return
-                else:
-                    # D1 为空：若本地有数据则迁移上传
-                    local_favorites = None
-                    try:
-                        local_favorites = self._parse_favorites_file()
-                    except Exception as e:
-                        print(f"读取本地收藏夹失败: {e}")
-                    self._apply_loaded_favorites(local_favorites)
-                    if any(self.favorites.values()):
-                        print("D1 为空，正在迁移本地收藏夹到 D1...")
-                        self.d1.save_async(self.favorites)
-                    return
-            except Exception as e:
-                print(f"从 D1 加载失败，回退到本地文件: {e}")
+        self._cloud_ready = False
 
-        # 2) 回退：从本地文件加载
+        if not self.d1.enabled:
+            print("未配置云端，收藏夹为空")
+            self._apply_loaded_favorites({})
+            return
+
+        if not self.d1.has_valid_token():
+            print("未登录云端，收藏夹为空")
+            self._apply_loaded_favorites({})
+            return
+
         try:
-            local_favorites = self._parse_favorites_file()
-            self._apply_loaded_favorites(local_favorites)
-            # 保存为新格式（仅本地）
-            self._write_favorites_file()
+            d1_favorites = self.d1.load()
+            self._apply_loaded_favorites(d1_favorites or {})
+            self._cloud_ready = True
+            print("已从云端加载收藏夹")
         except Exception as e:
-            print(f"加载收藏记录时出错: {e}")
-            self.favorites = {"默认收藏夹": []}
-            self.folder_combo.clear()
-            self.folder_combo.addItem("默认收藏夹")
-
-    def _write_favorites_file(self):
-        """把收藏夹数据规整为字典格式并写入本地文件（离线缓存）。"""
-        # 确保所有收藏夹中的项目都使用字典格式
-        for folder_name in self.favorites:
-            for i, item in enumerate(self.favorites[folder_name]):
-                if not isinstance(item, dict):
-                    self.favorites[folder_name][i] = {
-                        "text": str(item),
-                        "description": ""
-                    }
-
-        # 保存到文件
-        with open(self.favorites_file, 'w', encoding='utf-8') as f:
-            json.dump(self.favorites, f, ensure_ascii=False, indent=2)
+            print(f"从云端加载收藏夹失败: {e}")
+            self._apply_loaded_favorites({})
 
     def _ensure_cloud_login(self):
-        """确保云端已登录：本地有未过期 token 则直接用，否则弹出登录框。
-
-        用户跳过登录时，本次运行回退为仅使用本地数据。
-        """
+        """确保云端已登录：本地有未过期 token 则直接用，否则弹出登录框。"""
         if self.d1.has_valid_token():
             print(f"已使用本地登录凭据：{self.d1.username}")
             return
@@ -2437,19 +2439,19 @@ class ClipboardHistoryApp(QMainWindow):
         if self.d1.has_valid_token():
             print(f"已登录云端：{self.d1.username}")
         else:
-            print("未登录，本次仅使用本地数据")
+            print("未登录，收藏夹将无法读取/保存（本应用仅使用云端数据）")
 
     def save_favorites(self):
-        """保存收藏记录：写入本地文件，并异步同步到云端 Worker。"""
+        """只把收藏记录异步保存到云端 Worker（不写本地文件）。"""
         try:
-            # 1) 写入本地文件（快速、作为离线缓存与回退）
-            self._write_favorites_file()
-            print(f"收藏已保存到本地: {self.favorites_file}")
-
-            # 2) 异步推送到云端（后台线程，不阻塞 UI；需已登录）
-            if self.d1.enabled and self.d1.has_valid_token():
-                self.d1.save_async(self.favorites)
-
+            if not (self.d1.enabled and self.d1.has_valid_token()):
+                print("未登录云端，无法保存收藏夹")
+                return
+            # 云端数据尚未成功加载时，不要用内存里的空/不完整数据覆盖云端
+            if not getattr(self, '_cloud_ready', False):
+                print("云端数据未就绪，跳过保存以保护云端数据")
+                return
+            self.d1.save_async(self.favorites)
         except Exception as e:
             print(f"保存收藏记录时出错: {e}")
             traceback.print_exc()

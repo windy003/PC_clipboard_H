@@ -66,6 +66,9 @@ class FavAdapter(
 
     override fun getItemCount(): Int = rows.size
 
+    /** 返回指定位置的条目行；若该位置是标题行或越界则返回 null（用于左滑删除）。 */
+    fun itemAt(position: Int): Row.Item? = rows.getOrNull(position) as? Row.Item
+
     private class HeaderVH(view: View) : RecyclerView.ViewHolder(view) {
         private val text: TextView = view.findViewById(R.id.headerText)
         fun bind(row: Row.Header) {

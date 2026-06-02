@@ -1,6 +1,9 @@
 package com.example.clipboardviewer
 
 import android.content.Context
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.os.Bundle
 import android.view.View
 import android.widget.AdapterView
@@ -9,7 +12,9 @@ import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import com.example.clipboardviewer.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -37,6 +42,7 @@ class MainActivity : AppCompatActivity() {
 
         binding.recyclerView.layoutManager = LinearLayoutManager(this)
         binding.recyclerView.adapter = adapter
+        attachSwipeToDelete()
 
         binding.urlInput.setText(prefs.getString(KEY_URL, defaultUrl))
         binding.userInput.setText(prefs.getString(KEY_USER, ""))
@@ -200,6 +206,62 @@ class MainActivity : AppCompatActivity() {
                 setLoading(false)
             }
         }
+    }
+
+    // ---------- 左滑删除 ----------
+    private fun attachSwipeToDelete() {
+        val redPaint = Paint().apply { color = Color.parseColor("#F44336") }
+        val textPaint = Paint().apply {
+            color = Color.WHITE
+            isAntiAlias = true
+            textAlign = Paint.Align.RIGHT
+            textSize = 44f
+        }
+
+        val callback = object : ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT) {
+            override fun onMove(
+                rv: RecyclerView,
+                vh: RecyclerView.ViewHolder,
+                target: RecyclerView.ViewHolder
+            ): Boolean = false
+
+            // 只允许"条目行"左滑，标题行不可滑
+            override fun getSwipeDirs(rv: RecyclerView, vh: RecyclerView.ViewHolder): Int {
+                val pos = vh.bindingAdapterPosition
+                return if (pos != RecyclerView.NO_POSITION && adapter.itemAt(pos) != null)
+                    ItemTouchHelper.LEFT else 0
+            }
+
+            override fun onSwiped(vh: RecyclerView.ViewHolder, direction: Int) {
+                val pos = vh.bindingAdapterPosition
+                val item = if (pos != RecyclerView.NO_POSITION) adapter.itemAt(pos) else null
+                // 先把该行恢复显示（删除完成后会整体刷新列表；失败则保留该行）
+                if (pos != RecyclerView.NO_POSITION) adapter.notifyItemChanged(pos)
+                // 左滑直接删除，不弹确认
+                if (item != null && item.id > 0) doDelete(item.id)
+                else if (item != null) toast("该条目无法删除")
+            }
+
+            // 左滑时在条目右侧绘制红色背景与“删除”文字
+            override fun onChildDraw(
+                c: Canvas,
+                rv: RecyclerView,
+                vh: RecyclerView.ViewHolder,
+                dX: Float,
+                dY: Float,
+                actionState: Int,
+                isCurrentlyActive: Boolean
+            ) {
+                if (actionState == ItemTouchHelper.ACTION_STATE_SWIPE) {
+                    val v = vh.itemView
+                    c.drawRect(v.right + dX, v.top.toFloat(), v.right.toFloat(), v.bottom.toFloat(), redPaint)
+                    val y = v.top + (v.height + textPaint.textSize) / 2f
+                    c.drawText("删除", v.right - 30f, y, textPaint)
+                }
+                super.onChildDraw(c, rv, vh, dX, dY, actionState, isCurrentlyActive)
+            }
+        }
+        ItemTouchHelper(callback).attachToRecyclerView(binding.recyclerView)
     }
 
     // ---------- 删除条目 ----------
