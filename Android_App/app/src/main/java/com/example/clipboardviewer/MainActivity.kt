@@ -304,7 +304,8 @@ class MainActivity : AppCompatActivity() {
                         // 本地已到期条目：删掉旧记录，按当前时间重新延后 3 天。
                         snoozeLocal(item.id, item.text)
                     } else {
-                        addToLocal(item.text)
+                        // 云条目：写入本地成功后，从云端删除（相当于挪进本地3天后清单）。
+                        if (addToLocal(item.text) && item.id > 0) doDelete(item.id)
                     }
                 } else {
                     // 左滑：删除
@@ -382,15 +383,17 @@ class MainActivity : AppCompatActivity() {
         showError(if (due.isEmpty()) "没有已到期的本地条目" else null)
     }
 
-    /** 把一条内容写入本地文件（附时间戳）。 */
-    private fun addToLocal(text: String) {
-        if (!ensureStoragePermission()) return
-        try {
+    /** 把一条内容写入本地文件（附时间戳）。返回是否写入成功。 */
+    private fun addToLocal(text: String): Boolean {
+        if (!ensureStoragePermission()) return false
+        return try {
             LocalStore.append(text)
             toast("已加入本地3天后")
             if (localMode) loadLocalData()
+            true
         } catch (e: Exception) {
             showError("写入失败：${e.message}")
+            false
         }
     }
 
