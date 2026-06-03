@@ -2,7 +2,6 @@ build
 dist
 .claude
 .clipboard_history.json
-.env
 .clipboard_favorites.json
 .clipboard_token.json
 worker/.dev.vars.example
