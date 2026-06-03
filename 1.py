@@ -1877,6 +1877,10 @@ class ClipboardHistoryApp(QMainWindow):
         # 添加分隔线
         tray_menu.addSeparator()
 
+        # 添加重启动作
+        restart_action = tray_menu.addAction("重启(&R)")
+        restart_action.triggered.connect(self.restart_app)
+
         # 添加退出动作
         quit_action = tray_menu.addAction("退出(&X)")
         quit_action.triggered.connect(QApplication.quit)
@@ -1889,6 +1893,12 @@ class ClipboardHistoryApp(QMainWindow):
         
         # 双击托盘图标显示窗口
         self.tray_icon.activated.connect(self.tray_icon_activated)
+
+    def restart_app(self):
+        """重启应用程序"""
+        import subprocess
+        subprocess.Popen([sys.executable] + sys.argv)
+        QApplication.quit()
 
     def create_default_icon(self):
         """创建一个简单的默认图标"""
