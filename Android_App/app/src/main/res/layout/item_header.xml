@@ -3,9 +3,9 @@
     android:id="@+id/headerText"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:background="#EEEEEE"
+    android:background="?attr/colorSurfaceVariant"
     android:paddingHorizontal="12dp"
     android:paddingVertical="8dp"
-    android:textColor="#1976D2"
+    android:textColor="?attr/colorPrimary"
     android:textSize="16sp"
     android:textStyle="bold" />
