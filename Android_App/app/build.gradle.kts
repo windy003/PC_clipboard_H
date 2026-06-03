@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.clipboardviewer"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "2026/6/3-1"
+        versionCode = 2
+        versionName = "2026/6/4-1"
     }
 
     buildTypes {

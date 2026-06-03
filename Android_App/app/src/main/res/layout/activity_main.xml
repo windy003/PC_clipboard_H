@@ -88,6 +88,13 @@
                 android:text="登出" />
         </LinearLayout>
 
+        <!-- 数据源切换：云条目 / 本地条目 -->
+        <Spinner
+            android:id="@+id/modeSpinner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp" />
+
         <Spinner
             android:id="@+id/folderSpinner"
             android:layout_width="match_parent"

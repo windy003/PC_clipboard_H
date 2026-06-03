@@ -4,10 +4,22 @@
     <!-- 需要联网访问 Worker 接口 -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- 写入「外部存储/1/local_3_days_later.txt」 -->
+    <!-- Android 10 及以下用传统外部存储权限 -->
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!-- Android 11+ 写入外部存储根目录需「所有文件访问」权限 -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+
     <application
         android:allowBackup="true"
         android:icon="@drawable/a2048x2048"
         android:label="D1剪贴板查看器"
+        android:requestLegacyExternalStorage="true"
         android:supportsRtl="true"
         android:theme="@style/Theme.ClipboardViewer">
         <activity
