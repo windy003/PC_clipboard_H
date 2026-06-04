@@ -370,6 +370,9 @@ class MainActivity : AppCompatActivity() {
         val due = entries.filter { now >= it.dueAt }       // 已到期，显示
         val waiting = entries.size - due.size              // 未到期，隐藏
 
+        // 把「已到期」条目数推送到桌面「剪贴板本地」小部件，并让其计时器归零
+        LocalWidgetProvider.pushCountFromApp(this, due.size)
+
         val rows = mutableListOf<Row>()
         rows.add(Row.Header("本地3天后  (${due.size})"))
         for (e in due) {

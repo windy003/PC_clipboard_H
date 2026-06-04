@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 「本地3天后」已到期条目数小部件配置：最小 1×1（一个图标大小）。
+     每分钟刷新由 AlarmManager 驱动；updatePeriodMillis 仅作为重启后自愈的兜底（30 分钟）。
+     复用云端组件的布局 memory_widget，保证样式/颜色/大小一致。 -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="40dp"
+    android:minHeight="40dp"
+    android:targetCellWidth="1"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/memory_widget"
+    android:previewLayout="@layout/memory_widget"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:description="@string/widget_local_desc" />

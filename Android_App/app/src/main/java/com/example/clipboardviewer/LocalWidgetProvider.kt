@@ -20,18 +20,18 @@ import android.widget.RemoteViews
 import kotlin.concurrent.thread
 
 /**
- * 主屏小部件：每分钟检查一次服务器，显示「记忆」收藏夹的条目数。
+ * 主屏小部件：每分钟检查一次本地「3天后」清单，显示已到期的条目数。
  *
- * 三行：
- *  - d1剪贴板（橙色，固定标题）
- *  - N个（红色，条目数）
- *  - X分钟前（绿色，距上次成功检查的时间）
+ * 样式/颜色/大小与「剪贴板云端」(MemoryWidgetProvider) 完全一致，复用同一份布局
+ * (memory_widget.xml)，只是标题与数据来源不同：
+ *  - 剪贴板本地（橙色，固定标题）
+ *  - N个（数字红色 + “个”绿色，已到期条目数）
+ *  - X分钟前（红色计时器 + 蓝色“前”，距上次成功检查的时间）
  *
- * 系统小部件自带的 updatePeriodMillis 最短只能 30 分钟，无法满足“每分钟”，
- * 因此用 AlarmManager 每 60 秒发一次广播触发刷新。登录态/Worker 地址复用
- * 主界面写入的同一份 SharedPreferences。
+ * 数据来源是本地文件 LocalStore.dueEntries()（加入满 3 天才算到期），不需要联网/登录。
+ * 与云端组件一样用 AlarmManager 每 60 秒触发一次刷新，Chronometer 每秒自动 +1。
  */
-class MemoryWidgetProvider : AppWidgetProvider() {
+class LocalWidgetProvider : AppWidgetProvider() {
 
     override fun onEnabled(context: Context) {
         // 第一个小部件被添加：立即检查一次（检查完成后会自动排下一次闹钟）
@@ -51,7 +51,7 @@ class MemoryWidgetProvider : AppWidgetProvider() {
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
         when (intent.action) {
-            ACTION_REFRESH -> refreshCount(context)          // 闹钟/自身触发：后台拉取
+            ACTION_REFRESH -> refreshCount(context)          // 闹钟/自身触发：后台读取
             ACTION_REDRAW -> updateAllWidgets(context)        // App 已写入数据：只重绘
         }
     }
@@ -66,32 +66,24 @@ class MemoryWidgetProvider : AppWidgetProvider() {
         updateAllWidgets(context)
     }
 
-    /** 后台拉取「记忆」条目数，写入缓存后刷新所有小部件实例，并排下一次闹钟。 */
+    /** 后台读取本地已到期条目数，写入缓存后刷新所有小部件实例，并排下一次闹钟。 */
     private fun refreshCount(context: Context) {
         val pending = goAsync()
         thread {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             try {
-                val url = prefs.getString(KEY_URL, "") ?: ""
-                val token = prefs.getString(KEY_TOKEN, "") ?: ""
-                val exp = prefs.getLong(KEY_EXP, 0L)
-                val loggedIn = url.isNotEmpty() && token.isNotEmpty() &&
-                    System.currentTimeMillis() / 1000 < exp - 60
-                if (loggedIn) {
-                    val now = System.currentTimeMillis()
-                    try {
-                        val infos = ClipboardApi.listFolders(url, token)
-                        val count = infos.firstOrNull { it.name == MEMORY_FOLDER }?.count ?: 0
-                        // 成功：更新条目数与“上次检查时间”（计时器归零）
-                        prefs.edit()
-                            .putInt(KEY_WIDGET_COUNT, count)
-                            .putLong(KEY_WIDGET_TIME, now)
-                            .apply()
-                    } catch (e: Exception) {
-                        // 网络失败：条目数保留上次，但仍记一次“检查时间”让计时器归零
-                        prefs.edit().putLong(KEY_WIDGET_TIME, now).apply()
-                    }
+                val now = System.currentTimeMillis()
+                val count = try {
+                    LocalStore.dueEntries().size
+                } catch (e: Exception) {
+                    // 读取失败（如暂无权限）：沿用上次条目数
+                    prefs.getInt(KEY_WIDGET_COUNT, 0)
                 }
+                // 每次检查都更新条目数与“上次检查时间”（计时器归零）
+                prefs.edit()
+                    .putInt(KEY_WIDGET_COUNT, count)
+                    .putLong(KEY_WIDGET_TIME, now)
+                    .apply()
             } finally {
                 updateAllWidgets(context)
                 scheduleNextAlarm(context)   // 链式排下一次检查
@@ -103,7 +95,7 @@ class MemoryWidgetProvider : AppWidgetProvider() {
     /** 用缓存的数据重绘所有小部件实例。 */
     private fun updateAllWidgets(context: Context) {
         val mgr = AppWidgetManager.getInstance(context)
-        val ids = mgr.getAppWidgetIds(ComponentName(context, MemoryWidgetProvider::class.java))
+        val ids = mgr.getAppWidgetIds(ComponentName(context, LocalWidgetProvider::class.java))
         if (ids.isEmpty()) return
 
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -111,11 +103,7 @@ class MemoryWidgetProvider : AppWidgetProvider() {
         val count = prefs.getInt(KEY_WIDGET_COUNT, 0)
         val lastTime = prefs.getLong(KEY_WIDGET_TIME, 0L)
 
-        val token = prefs.getString(KEY_TOKEN, "") ?: ""
-        val exp = prefs.getLong(KEY_EXP, 0L)
-        val loggedIn = token.isNotEmpty() && System.currentTimeMillis() / 1000 < exp - 60
-
-        val countText = if (!loggedIn && !hasData) "未登录" else "${count}个"
+        val countText = "${count}个"
 
         for (id in ids) {
             val views = RemoteViews(context.packageName, R.layout.memory_widget)
@@ -125,24 +113,20 @@ class MemoryWidgetProvider : AppWidgetProvider() {
 
             val thirdText: String
             if (hasData) {
-                // 第三行：用 Chronometer 实时跳动显示“距上次检查过了多久”。
-                // base 用 elapsedRealtime 基准：把上次检查的墙钟时刻换算成对应的开机计时，
-                // 这样桌面会每秒自动 +1；每次成功检查后 lastTime 更新，秒数自动归零重新计。
-                // 格式只用 "%s"（不含“前”），时间为红色；“前”由旁边的蓝色 widget_suffix 显示。
+                // 第三行：用 Chronometer 实时跳动显示“距上次检查过了多久”，每秒自动 +1。
                 val elapsed = System.currentTimeMillis() - lastTime
                 val base = SystemClock.elapsedRealtime() - elapsed
                 views.setChronometer(R.id.widget_chrono, base, "%s", true)
                 views.setViewVisibility(R.id.widget_chrono_row, View.VISIBLE)
                 views.setViewVisibility(R.id.widget_status, View.GONE)
-                thirdText = "00:00前"   // 用于按宽度估算字号（取较常见的长度）
+                thirdText = "00:00前"   // 用于按宽度估算字号
             } else {
                 // 还没有任何数据：隐藏计时器行，显示占位文字
-                val status = if (loggedIn) "等待检查" else "未登录"
                 views.setChronometer(R.id.widget_chrono, SystemClock.elapsedRealtime(), null, false)
                 views.setViewVisibility(R.id.widget_chrono_row, View.GONE)
                 views.setViewVisibility(R.id.widget_status, View.VISIBLE)
-                views.setTextViewText(R.id.widget_status, status)
-                thirdText = status
+                views.setTextViewText(R.id.widget_status, "等待检查")
+                thirdText = "等待检查"
             }
 
             // 测量小部件宽高，每行字号取 min(行高, 宽度可容纳)，尽量大且不溢出
@@ -167,18 +151,14 @@ class MemoryWidgetProvider : AppWidgetProvider() {
         thirdText: String
     ) {
         val opts = mgr.getAppWidgetOptions(id)
-        // 竖屏当前高≈MAX_HEIGHT、宽≈MIN_WIDTH；用 MIN_WIDTH 作宽度保证两种朝向都不溢出
         val hMax = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0)
         val hMin = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0)
         val heightDp = maxOf(hMax, hMin).let { if (it > 0) it else 110 }
         val wMin = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0)
         val widthDp = (if (wMin > 0) wMin else 60).toFloat() - 4f  // 减去内边距余量
 
-        // 行高（字号上限）：总高 / 3。单行文字实际占高 ≈ 字号 ×1.2，
-        // 故取 0.78 留出行高余量，避免文字底部被裁切。
         val rowSize = heightDp / 3f * 0.78f
 
-        // 估算一段文字在字号 S 时的宽度 ≈ S × 字符当量总和，反推不溢出时的最大字号
         fun fitByWidth(text: String): Float {
             var units = 0f
             for (c in text) {
@@ -197,14 +177,13 @@ class MemoryWidgetProvider : AppWidgetProvider() {
 
         views.setTextViewTextSize(R.id.widget_title, TypedValue.COMPLEX_UNIT_DIP, sizeFor(titleText))
         views.setTextViewTextSize(R.id.widget_count, TypedValue.COMPLEX_UNIT_DIP, sizeFor(countText))
-        // 第三行：计时器和“前”用同一字号（按整段 "00:00前" 估算宽度），保持视觉一致
         val thirdSize = sizeFor(thirdText)
         views.setTextViewTextSize(R.id.widget_chrono, TypedValue.COMPLEX_UNIT_DIP, thirdSize)
         views.setTextViewTextSize(R.id.widget_suffix, TypedValue.COMPLEX_UNIT_DIP, thirdSize)
         views.setTextViewTextSize(R.id.widget_status, TypedValue.COMPLEX_UNIT_DIP, thirdSize)
     }
 
-    /** 把 "N个" 着色为：数字红色、“个”绿色；非该格式（如“未登录”）则整体红色。 */
+    /** 把 "N个" 着色为：数字红色、“个”绿色。 */
     private fun colorizeCount(text: String): CharSequence {
         val sp = SpannableString(text)
         if (text.endsWith("个") && text.length >= 2) {
@@ -226,19 +205,20 @@ class MemoryWidgetProvider : AppWidgetProvider() {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        return PendingIntent.getActivity(context, 0, intent, flags)
+        // requestCode 与云端组件区分，避免 PendingIntent 互相覆盖
+        return PendingIntent.getActivity(context, 1, intent, flags)
     }
 
     // ---------- 定时器 ----------
     private fun refreshPendingIntent(context: Context): PendingIntent {
-        val intent = Intent(context, MemoryWidgetProvider::class.java).apply { action = ACTION_REFRESH }
+        val intent = Intent(context, LocalWidgetProvider::class.java).apply { action = ACTION_REFRESH }
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        return PendingIntent.getBroadcast(context, 0, intent, flags)
+        return PendingIntent.getBroadcast(context, 1, intent, flags)
     }
 
     /**
-     * 排下一次（60 秒后）的一次性闹钟。每次检查完成后再排下一次，比 setRepeating
-     * 的批处理更准时。尽量用“精确 + 允许 Doze”模式；无精确闹钟权限时退回允许 Doze 的非精确闹钟。
+     * 排下一次（60 秒后）的一次性闹钟。每次检查完成后再排下一次。
+     * 尽量用“精确 + 允许 Doze”模式；无精确闹钟权限时退回允许 Doze 的非精确闹钟。
      */
     private fun scheduleNextAlarm(context: Context) {
         val am = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
@@ -254,7 +234,6 @@ class MemoryWidgetProvider : AppWidgetProvider() {
                     am.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi)
             }
         } catch (e: SecurityException) {
-            // 某些系统对精确闹钟有限制：退回允许 Doze 的非精确闹钟
             am.setAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP, triggerAt, pi)
         }
     }
@@ -265,35 +244,30 @@ class MemoryWidgetProvider : AppWidgetProvider() {
     }
 
     companion object {
-        private const val ACTION_REFRESH = "com.example.clipboardviewer.WIDGET_REFRESH"
-        private const val ACTION_REDRAW = "com.example.clipboardviewer.WIDGET_REDRAW"
+        private const val ACTION_REFRESH = "com.example.clipboardviewer.LOCAL_WIDGET_REFRESH"
+        private const val ACTION_REDRAW = "com.example.clipboardviewer.LOCAL_WIDGET_REDRAW"
         private const val INTERVAL_MS = 60_000L   // 每分钟检查一次
-        private const val WIDGET_TITLE = "剪贴板云端"   // 第一行标题（云端条目数）
+        private const val WIDGET_TITLE = "剪贴板本地"   // 第一行标题（本地已到期条目数）
 
-        // 与 MainActivity 共用的登录态
         private const val PREFS = "clipboard_viewer"
-        private const val KEY_URL = "worker_url"
-        private const val KEY_TOKEN = "token"
-        private const val KEY_EXP = "expires_at"
-        private const val MEMORY_FOLDER = "记忆"
 
         /**
-         * 供主界面刷新时调用：写入最新「记忆」条目数与当前时间（计时器归零），
-         * 并立即重绘小部件（不再触发后台网络请求）。
+         * 供主界面操作本地清单后调用：写入最新「已到期」条目数与当前时间（计时器归零），
+         * 并立即重绘小部件（不再触发后台读取）。
          */
-        fun pushCountFromApp(context: Context, memoryCount: Int) {
+        fun pushCountFromApp(context: Context, dueCount: Int) {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-                .putInt(KEY_WIDGET_COUNT, memoryCount)
+                .putInt(KEY_WIDGET_COUNT, dueCount)
                 .putLong(KEY_WIDGET_TIME, System.currentTimeMillis())
                 .apply()
-            val intent = Intent(context, MemoryWidgetProvider::class.java).apply {
+            val intent = Intent(context, LocalWidgetProvider::class.java).apply {
                 action = ACTION_REDRAW
             }
             context.sendBroadcast(intent)
         }
 
-        // 小部件自身的缓存
-        private const val KEY_WIDGET_COUNT = "widget_memory_count"
-        private const val KEY_WIDGET_TIME = "widget_memory_time"
+        // 小部件自身的缓存（与云端组件用不同的键，互不影响）
+        private const val KEY_WIDGET_COUNT = "widget_local_count"
+        private const val KEY_WIDGET_TIME = "widget_local_time"
     }
 }
