@@ -1989,7 +1989,7 @@ class ClipboardHistoryApp(QMainWindow):
         size = 64
         pixmap = QPixmap(size, size)
         # 方形背景：整块填充，不留透明边
-        pixmap.fill(QColor("#FF8C00"))
+        pixmap.fill(QColor("#2E7D32"))
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
