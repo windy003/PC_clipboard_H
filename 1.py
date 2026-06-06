@@ -1471,6 +1471,29 @@ class CloudCountWorker(QThread):
             self.finished_count.emit(0, False)
 
 
+class CloudAppendWorker(QThread):
+    """后台线程：把一条记忆「只追加」到云端（不影响其它收藏夹），完成后用信号回传。
+
+    出箱模式专用：成功后主线程会把这条从本地待发队列删除（之后不再上传），
+    失败则保留在本地以便下次重试。放后台是为了不阻塞 UI。
+    """
+    finished_append = pyqtSignal(str, bool, str)  # (text, 是否成功, 错误信息)
+
+    def __init__(self, d1, folder, text, parent=None):
+        super().__init__(parent)
+        self.d1 = d1
+        self.folder = folder
+        self.text = text
+
+    def run(self):
+        try:
+            self.d1.append(self.folder, [{"text": self.text, "description": ""}])
+            self.finished_append.emit(self.text, True, "")
+        except Exception as e:
+            print(f"追加记忆到云端失败: {e}")
+            self.finished_append.emit(self.text, False, str(e))
+
+
 class ClipboardHistoryApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -2394,6 +2417,10 @@ class ClipboardHistoryApp(QMainWindow):
         """把加载到的收藏夹数据应用到界面。"""
         self.favorites = favorites or {}
 
+        # 「记忆」夹走出箱模式：本地只作「待发队列」，启动时清空，不载入云端已累积的记忆
+        # （那些交给安卓 app 处理）。这样本地也绝不会把旧记忆重新整包上传到云端。
+        self.favorites["记忆"] = []
+
         # 确保至少有默认收藏夹
         if "默认收藏夹" not in self.favorites:
             self.favorites["默认收藏夹"] = []
@@ -2452,7 +2479,11 @@ class ClipboardHistoryApp(QMainWindow):
             print("未登录，收藏夹将无法读取/保存（本应用仅使用云端数据）")
 
     def save_favorites(self):
-        """只把收藏记录异步保存到云端 Worker（不写本地文件）。"""
+        """把收藏记录（不含「记忆」夹）异步整包保存到云端 Worker（不写本地文件）。
+
+        「记忆」夹走出箱模式：经 /append 只追加、同步成功后本地删除，故不能参与这里的
+        整包覆盖——否则本地清空后会把云端已累积的记忆一并删掉。详见 _send_to_memory。
+        """
         try:
             if not (self.d1.enabled and self.d1.has_valid_token()):
                 print("未登录云端，无法保存收藏夹")
@@ -2461,7 +2492,9 @@ class ClipboardHistoryApp(QMainWindow):
             if not getattr(self, '_cloud_ready', False):
                 print("云端数据未就绪，跳过保存以保护云端数据")
                 return
-            self.d1.save_async(self.favorites)
+            # 排除「记忆」夹后再整包保存
+            snapshot = {k: v for k, v in self.favorites.items() if k != "记忆"}
+            self.d1.save_async(snapshot)
         except Exception as e:
             print(f"保存收藏记录时出错: {e}")
             traceback.print_exc()
@@ -2701,44 +2734,99 @@ class ClipboardHistoryApp(QMainWindow):
             self._toast = ToastNotification(self)
         self._toast.show_message(message, duration, anchor=self)
 
-    def move_history_to_memory(self):
-        """将历史记录中高亮选中的条目移动到「记忆」收藏夹，并弹出 2 秒成功提示。"""
-        MEMORY_FOLDER = "记忆"
+    def _send_to_memory(self, text):
+        """把一条文本送入「记忆」出箱：先入本地待发队列，再后台「只追加」到云端。
 
+        同步成功后本地删除这条（之后绝不会再被上传），失败则留在本地待发队列、下次重试。
+        云端只增不减，交给安卓 app 独立处理。返回 True 表示已受理（开始同步）。
+        """
+        MEMORY_FOLDER = "记忆"
+        if not text:
+            return False
+
+        # 出箱依赖云端：未登录则无法同步，直接告知用户
+        if not (self.d1.enabled and self.d1.has_valid_token()):
+            self.show_toast("失败,未登录云端,无法同步记忆", 1500)
+            return False
+
+        # 确保「记忆」收藏夹存在于下拉菜单
+        self.favorites.setdefault(MEMORY_FOLDER, [])
+        if self.folder_combo.findText(MEMORY_FOLDER) == -1:
+            self.folder_combo.addItem(MEMORY_FOLDER)
+
+        # 待发队列里已有相同文本（含正在发送中的）则不重复加入
+        pending_texts = {(it["text"] if isinstance(it, dict) else str(it))
+                         for it in self.favorites[MEMORY_FOLDER]}
+        if text in pending_texts:
+            self.show_toast("失败,记忆文件夹中已存在相同条目", 1500)
+            return False
+
+        # 先放入本地待发队列（同步成功前不丢）
+        self.favorites[MEMORY_FOLDER].append({"text": text, "description": ""})
+        if self.current_folder == MEMORY_FOLDER:
+            self.favorites_list.addItem(self.truncate_text(text))
+            self.update_list_numbers(self.favorites_list)
+
+        self.show_toast("正在同步记忆到云端…", 1000)
+        self._flush_pending_memory()
+        return True
+
+    def _flush_pending_memory(self):
+        """把本地「记忆」待发队列里尚未在途的条目逐条「只追加」到云端。"""
+        MEMORY_FOLDER = "记忆"
+        if not (self.d1.enabled and self.d1.has_valid_token()):
+            return
+        if not hasattr(self, "_memory_inflight"):
+            self._memory_inflight = set()      # 正在发送中的文本，避免重复发送
+        if not hasattr(self, "_append_workers"):
+            self._append_workers = []          # 持有运行中的线程，防止被回收
+
+        for item in list(self.favorites.get(MEMORY_FOLDER, [])):
+            text = item["text"] if isinstance(item, dict) else str(item)
+            if not text or text in self._memory_inflight:
+                continue
+            self._memory_inflight.add(text)
+            worker = CloudAppendWorker(self.d1, MEMORY_FOLDER, text, self)
+            worker.finished_append.connect(self._on_memory_appended)
+            self._append_workers.append(worker)
+            worker.start()
+
+    def _on_memory_appended(self, text, ok, err):
+        """CloudAppendWorker 的回调（主线程）：成功则从本地待发队列删除该条，失败则保留。"""
+        MEMORY_FOLDER = "记忆"
+        if hasattr(self, "_memory_inflight"):
+            self._memory_inflight.discard(text)
+        if hasattr(self, "_append_workers"):
+            self._append_workers = [w for w in self._append_workers if w.isRunning()]
+
+        if ok:
+            # 同步成功：从本地待发队列删除这条，之后不会再被上传
+            lst = self.favorites.get(MEMORY_FOLDER, [])
+            for i, item in enumerate(lst):
+                existing = item["text"] if isinstance(item, dict) else str(item)
+                if existing == text:
+                    lst.pop(i)
+                    break
+            if self.current_folder == MEMORY_FOLDER:
+                self.change_folder(MEMORY_FOLDER)  # 刷新列表显示
+            self.show_toast("成功,记忆已同步到云端", 1500)
+            # 刷新「记忆」数字托盘图标（从云端读取最新条目数）
+            try:
+                self.fetch_cloud_memory_count()
+            except Exception:
+                pass
+        else:
+            # 失败：保留在本地待发队列，下次添加新记忆或重启后会重试
+            self.show_toast("失败,未能同步到云端,已留在本地待重试", 2000)
+
+    def move_history_to_memory(self):
+        """将历史记录中高亮选中的条目送入「记忆」出箱（同步到云端后本地自动删除）。"""
         current_row = self.history_list.currentRow()
         if current_row < 0 or current_row >= len(self.clipboard_history):
             return
 
-        # 确保「记忆」收藏夹存在；不存在则创建并加入下拉菜单
-        if MEMORY_FOLDER not in self.favorites:
-            self.favorites[MEMORY_FOLDER] = []
-            if self.folder_combo.findText(MEMORY_FOLDER) == -1:
-                self.folder_combo.addItem(MEMORY_FOLDER)
-
-        # 取出原始文本
         text = self.clipboard_history[current_row]
-
-        # 若记忆夹中已存在相同文本的条目，则提示并放弃移动
-        for item in self.favorites[MEMORY_FOLDER]:
-            existing_text = item["text"] if isinstance(item, dict) else str(item)
-            if existing_text == text:
-                self.show_toast("条目已存在,移动失败", 2000)
-                return
-
-        # 以字典格式加入记忆夹
-        self.favorites[MEMORY_FOLDER].append({"text": text, "description": ""})
-
-        # 若当前正显示「记忆」收藏夹，同步刷新其列表显示
-        if self.current_folder == MEMORY_FOLDER:
-            truncated_text = self.truncate_text(text)
-            self.favorites_list.addItem(truncated_text)
-            self.update_list_numbers(self.favorites_list)
-
-        # 保存更改（本地 + 云端同步由 save_favorites 处理）
-        self.save_favorites()
-
-        # 弹出 2 秒后自动消失的成功提示
-        self.show_toast("成功把条目移动到记忆", 2000)
+        self._send_to_memory(text)
 
     def move_latest_clipboard_to_memory(self):
         """全局热键(Alt+Y)回调：模拟 Ctrl+C 复制当前选中的文字，并存入「记忆」收藏夹。
@@ -2785,9 +2873,7 @@ class ClipboardHistoryApp(QMainWindow):
             self.show_toast(f"失败,{e}", 1000)
 
     def _save_selection_to_memory(self):
-        """move_latest_clipboard_to_memory 的延迟回调：读取 Ctrl+C 复制到的选中文字并存入记忆夹。"""
-        MEMORY_FOLDER = "记忆"
-
+        """move_latest_clipboard_to_memory 的延迟回调：读取 Ctrl+C 复制到的选中文字并送入记忆出箱。"""
         try:
             text = self.clipboard.text()
             win_text = _win_clipboard_text()
@@ -2801,33 +2887,8 @@ class ClipboardHistoryApp(QMainWindow):
                 self.show_toast("没有选中的文字", 1000)
                 return
 
-            # 确保「记忆」收藏夹存在；不存在则创建并加入下拉菜单
-            if MEMORY_FOLDER not in self.favorites:
-                self.favorites[MEMORY_FOLDER] = []
-                if self.folder_combo.findText(MEMORY_FOLDER) == -1:
-                    self.folder_combo.addItem(MEMORY_FOLDER)
-
-            # 若记忆夹中已存在相同文本的条目，则视为失败并提示原因
-            for item in self.favorites[MEMORY_FOLDER]:
-                existing_text = item["text"] if isinstance(item, dict) else str(item)
-                if existing_text == text:
-                    self.show_toast("失败,记忆文件夹中已存在相同条目", 1000)
-                    return
-
-            # 以字典格式加入记忆夹
-            self.favorites[MEMORY_FOLDER].append({"text": text, "description": ""})
-
-            # 若当前正显示「记忆」收藏夹，同步刷新其列表显示
-            if self.current_folder == MEMORY_FOLDER:
-                truncated_text = self.truncate_text(text)
-                self.favorites_list.addItem(truncated_text)
-                self.update_list_numbers(self.favorites_list)
-
-            # 保存更改（本地 + 云端同步由 save_favorites 处理）
-            self.save_favorites()
-
-            # 弹出 1 秒后自动消失的成功提示
-            self.show_toast("成功地将选中文字复制到记忆文件夹", 1000)
+            # 送入「记忆」出箱：同步到云端后本地自动删除，提示由 _send_to_memory 处理
+            self._send_to_memory(text)
         except Exception as e:
             self.show_toast(f"失败,{e}", 1000)
 

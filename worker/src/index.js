@@ -323,6 +323,61 @@ async function saveFavorites(db, userId, favorites) {
   await db.batch(stmts);
 }
 
+/**
+ * 把若干条目「只追加」到指定收藏夹（不删除任何已有数据）。
+ *
+ * 用于「记忆」出箱模式：PC 端推送成功后会清空本地，云端只增不减，交由安卓 app
+ * 独立处理。与全量覆盖的 saveFavorites 不同，这里绝不 DELETE。
+ */
+async function appendFavorites(db, userId, folder, entries) {
+  await ensureSchema(db);
+  if (!folder || !Array.isArray(entries) || entries.length === 0) return 0;
+
+  // 确保收藏夹存在于 folders 表（新建时排到末尾；已存在则忽略，position 不变）
+  const folderPosRow = await db
+    .prepare("SELECT COALESCE(MAX(position), -1) + 1 AS pos FROM folders WHERE user_id = ?")
+    .bind(userId)
+    .first();
+  await db
+    .prepare("INSERT OR IGNORE INTO folders (user_id, name, position) VALUES (?, ?, ?)")
+    .bind(userId, folder, folderPosRow ? folderPosRow.pos : 0)
+    .run();
+
+  // 取该收藏夹当前最大 position，新条目顺延，保持先进先出的顺序
+  const maxRow = await db
+    .prepare(
+      "SELECT COALESCE(MAX(position), -1) AS maxpos FROM favorites WHERE user_id = ? AND folder = ?"
+    )
+    .bind(userId, folder)
+    .first();
+  let pos = (maxRow ? maxRow.maxpos : -1) + 1;
+
+  const stmts = [];
+  for (const entry of entries) {
+    let text = "";
+    let desc = "";
+    if (entry && typeof entry === "object") {
+      text = entry.text != null ? String(entry.text) : "";
+      desc = entry.description != null ? String(entry.description) : "";
+    } else {
+      text = String(entry);
+    }
+    if (!text) continue;
+    stmts.push(
+      db
+        .prepare(
+          "INSERT INTO favorites (user_id, folder, text, description, position) " +
+            "VALUES (?, ?, ?, ?, ?)"
+        )
+        .bind(userId, folder, text, desc, pos)
+    );
+    pos += 1;
+  }
+  if (stmts.length === 0) return 0;
+  await db.batch(stmts);
+  return stmts.length;
+}
+
 // ---------- 请求处理 ----------
 async function readJsonBody(request) {
   try {
@@ -422,6 +477,19 @@ export default {
         }
         await saveFavorites(env.DB, userId, favorites);
         return json({ ok: true });
+      }
+
+      if (url.pathname === "/append") {
+        // 只往某个收藏夹追加条目，不触碰其它数据。body: { folder, entries: [{text, description}] }
+        const body = await readJsonBody(request);
+        const folder =
+          body && typeof body.folder === "string" && body.folder ? body.folder : null;
+        const entries = body && Array.isArray(body.entries) ? body.entries : null;
+        if (!folder || !entries) {
+          return json({ ok: false, error: "缺少 folder 或 entries" }, 400);
+        }
+        const count = await appendFavorites(env.DB, userId, folder, entries);
+        return json({ ok: true, count });
       }
 
       if (url.pathname === "/delete") {

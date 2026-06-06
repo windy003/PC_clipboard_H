@@ -200,6 +200,18 @@ class D1Storage:
         if not data.get("ok"):
             raise RuntimeError(data.get("error") or "保存失败")
 
+    # ---------- 只追加（出箱模式）----------
+    def append(self, folder, entries):
+        """把若干条目「只追加」到云端指定收藏夹，不影响其它数据。
+
+        用于「记忆」出箱：PC 推送成功后本地删除该条，云端只增不减，交给安卓 app
+        处理。entries 形如 [{"text": ..., "description": ...}, ...]。返回实际写入条数。
+        """
+        data = self._post("/append", {"folder": folder, "entries": entries}, with_token=True)
+        if not data.get("ok"):
+            raise RuntimeError(data.get("error") or "追加失败")
+        return data.get("count", 0)
+
     # ---------- 异步保存 ----------
     def save_async(self, favorites):
         """在后台线程保存，避免阻塞 UI；总是推送最新快照。"""
