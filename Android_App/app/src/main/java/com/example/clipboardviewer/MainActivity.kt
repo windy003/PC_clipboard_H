@@ -13,8 +13,6 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import android.view.View
-import android.widget.AdapterView
-import android.widget.ArrayAdapter
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
@@ -29,6 +27,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/**
+ * 主界面：只显示本地「已发布」条目。
+ *
+ * 数据流（云端界面已取消，云端数据自动落地）：
+ *  1. 云端 Worker 有数据时（小部件每分钟检查 / 本页刷新），自动转存到
+ *     local_3_days_later.txt 并从云端删除（CloudSync）；
+ *  2. 每天 8:00 把满 3 天的条目移入 ready_to_release.txt，并按
+ *     「8小时 / 条目数」的间隔在 8:00-16:00 之间排程（ReleaseStore）；
+ *  3. 本页只显示发布时间已到的条目。左滑删除，右滑重新延后 3 天。
+ *
+ * 登录只为给自动同步提供云端 token，登录后界面上没有云端内容。
+ */
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
@@ -39,18 +49,10 @@ class MainActivity : AppCompatActivity() {
     // 默认填上你的 Worker 地址，按需修改。
     private val defaultUrl = "https://clipboard-fav-worker.mybrowser.workers.dev"
 
-    // 下拉每一项对应的收藏夹名；null 表示「全部」。与 spinner 选项一一对应。
-    private var folderKeys: List<String?> = listOf(null)
-    private var currentFolder: String? = DEFAULT_FOLDER   // 默认打开「记忆」收藏夹
-    private var suppressSpinner = false                    // 防止程序性设置 spinner 触发回调
-
-    private var localMode = false                          // false=云条目，true=本地条目
-    private var suppressMode = false                       // 防止程序性设置 modeSpinner 触发回调
-
     // Android 10 及以下：运行时申请写外部存储权限
     private val requestWritePermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-            if (granted) toast("已授予存储权限，请重新滑动") else toast("未授予存储权限，无法写入")
+            if (granted) toast("已授予存储权限，请重新操作") else toast("未授予存储权限，无法写入")
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -62,44 +64,12 @@ class MainActivity : AppCompatActivity() {
         binding.recyclerView.adapter = adapter
         attachSwipe()
 
-        // 数据源切换下拉：云条目 / 本地条目
-        val modeAdapter = ArrayAdapter(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            listOf("云条目", "本地条目")
-        )
-        suppressMode = true
-        binding.modeSpinner.adapter = modeAdapter
-        binding.modeSpinner.post { suppressMode = false }
-        binding.modeSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(p: AdapterView<*>?, v: View?, position: Int, id: Long) {
-                if (suppressMode) return
-                localMode = position == 1
-                if (hasValidToken()) refresh()
-            }
-
-            override fun onNothingSelected(p: AdapterView<*>?) {}
-        }
-
         binding.urlInput.setText(prefs.getString(KEY_URL, defaultUrl))
         binding.userInput.setText(prefs.getString(KEY_USER, ""))
 
         binding.loginButton.setOnClickListener { doLogin() }
         binding.refreshButton.setOnClickListener { refresh() }
         binding.logoutButton.setOnClickListener { logout() }
-
-        binding.folderSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-            override fun onItemSelected(p: AdapterView<*>?, v: View?, position: Int, id: Long) {
-                if (suppressSpinner) return
-                currentFolder = folderKeys.getOrNull(position)
-                loadData()
-            }
-
-            override fun onNothingSelected(p: AdapterView<*>?) {}
-        }
-
-        // 从小部件点进来时，按其携带的参数切换到「云条目」或「本地条目」模式
-        applyModeFromIntent(intent)
 
         if (hasValidToken()) {
             showContent()
@@ -109,23 +79,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Activity 已存在时再次被小部件唤起：切换到对应模式并刷新。 */
+    /** 从小部件再次进入时刷新一遍。 */
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
-        if (intent != null && intent.hasExtra(EXTRA_OPEN_MODE)) {
-            setIntent(intent)
-            applyModeFromIntent(intent)
-            if (hasValidToken()) refresh()
-        }
-    }
-
-    /** 读取 Intent 中的模式参数并同步 localMode 与模式下拉框；没有参数则不动。 */
-    private fun applyModeFromIntent(intent: Intent?) {
-        val mode = intent?.getStringExtra(EXTRA_OPEN_MODE) ?: return
-        localMode = mode == MODE_LOCAL
-        suppressMode = true
-        binding.modeSpinner.setSelection(if (localMode) 1 else 0)
-        binding.modeSpinner.post { suppressMode = false }
+        if (hasValidToken()) refresh()
     }
 
     // ---------- 登录态 ----------
@@ -157,7 +114,6 @@ class MainActivity : AppCompatActivity() {
                     .putLong(KEY_EXP, exp)
                     .apply()
                 binding.passInput.setText("")
-                currentFolder = DEFAULT_FOLDER
                 showContent()
                 refresh()
             } catch (e: Exception) {
@@ -171,115 +127,41 @@ class MainActivity : AppCompatActivity() {
     private fun logout() {
         prefs.edit().remove(KEY_TOKEN).remove(KEY_EXP).apply()
         adapter.submit(emptyList())
-        currentFolder = DEFAULT_FOLDER
         showLogin()
     }
 
-    // ---------- 刷新：重新拉取收藏夹列表 + 当前收藏夹内容 ----------
+    // ---------- 刷新：云端转存 + 每日检查 + 重新读取本地清单 ----------
     private fun refresh() {
         if (!hasValidToken()) {
             toast("登录已过期，请重新登录")
             logout()
             return
         }
-        if (localMode) {
-            binding.folderSpinner.visibility = View.GONE
-            loadLocalData()
-        } else {
-            binding.folderSpinner.visibility = View.VISIBLE
-            loadFolders()
-            loadData()
-        }
-    }
-
-    /** 拉取收藏夹列表，填充下拉。 */
-    private fun loadFolders() {
-        val url = prefs.getString(KEY_URL, defaultUrl) ?: defaultUrl
-        val token = prefs.getString(KEY_TOKEN, "") ?: ""
-        lifecycleScope.launch {
-            try {
-                val infos = withContext(Dispatchers.IO) { ClipboardApi.listFolders(url, token) }
-
-                // 把「记忆」条目数推送到桌面小部件，并让其计时器归零
-                val memoryCount = infos.firstOrNull { it.name == DEFAULT_FOLDER }?.count ?: 0
-                MemoryWidgetProvider.pushCountFromApp(this@MainActivity, memoryCount)
-
-                val displays = mutableListOf<String>()
-                val keys = mutableListOf<String?>()
-                var total = 0
-                for (f in infos) {
-                    displays.add("${f.name} (${f.count})")
-                    keys.add(f.name)
-                    total += f.count
-                }
-                displays.add(0, "全部 ($total)")
-                keys.add(0, null)
-                folderKeys = keys
-
-                // 当前选中的收藏夹若已不存在（比如默认的「记忆」还没建），回到「全部」
-                if (currentFolder != null && currentFolder !in keys) currentFolder = null
-                val selectIdx = keys.indexOf(currentFolder).let { if (it >= 0) it else 0 }
-
-                val spinnerAdapter = ArrayAdapter(
-                    this@MainActivity,
-                    android.R.layout.simple_spinner_dropdown_item,
-                    displays
-                )
-                suppressSpinner = true
-                binding.folderSpinner.adapter = spinnerAdapter
-                binding.folderSpinner.setSelection(selectIdx)
-                binding.folderSpinner.post { suppressSpinner = false }
-            } catch (e: ApiException) {
-                if (e.code == 401) { toast("登录已过期，请重新登录"); logout() }
-                else showError("获取收藏夹失败：${e.message}")
-            } catch (e: Exception) {
-                showError("获取收藏夹失败：${e.message}")
-            }
-        }
-    }
-
-    /** 拉取并显示当前收藏夹（currentFolder=null 时显示全部）。 */
-    private fun loadData() {
-        if (!hasValidToken()) {
-            toast("登录已过期，请重新登录")
-            logout()
-            return
-        }
-        val url = prefs.getString(KEY_URL, defaultUrl) ?: defaultUrl
-        val token = prefs.getString(KEY_TOKEN, "") ?: ""
         setLoading(true)
         showError(null)
         lifecycleScope.launch {
-            try {
-                val folders = withContext(Dispatchers.IO) {
-                    ClipboardApi.load(url, token, currentFolder)
+            // 1) 云端有数据则转存到本地（网络 IO，放后台线程）
+            val moved = withContext(Dispatchers.IO) {
+                try {
+                    CloudSync.syncOnce(this@MainActivity)
+                } catch (e: Exception) {
+                    0
                 }
-                adapter.submit(folders.toRows())
-                val count = folders.sumOf { it.items.size }
-                binding.statusText.text = if (currentFolder == null) {
-                    "全部：${folders.size} 个收藏夹，共 $count 条"
-                } else {
-                    "收藏夹「$currentFolder」：$count 条"
-                }
-                if (folders.isEmpty()) showError("没有数据") else showError(null)
-            } catch (e: ApiException) {
-                if (e.code == 401) { toast("登录已过期，请重新登录"); logout() }
-                else showError("读取失败：${e.message}")
-            } catch (e: Exception) {
-                showError("读取失败：${e.message}")
-            } finally {
-                setLoading(false)
             }
+            if (moved > 0) toast("已从云端转存 $moved 条到本地")
+            // 2) 每日 8:00 检查（幂等）+ 显示本地清单
+            setLoading(false)
+            loadLocalData()
         }
     }
 
-    // ---------- 滑动手势：左滑删除 / 右滑加入本地3天后 ----------
+    // ---------- 滑动手势：左滑删除 / 右滑重新延后3天 ----------
     private fun attachSwipe() {
         // 浅色 = 还没滑够，松手不执行；深色 = 已达阈值，松手即执行。
         val redLight = Paint().apply { color = Color.parseColor("#EF9A9A") }    // 删除（未到阈值）
         val redStrong = Paint().apply { color = Color.parseColor("#F44336") }   // 删除（已到阈值）
-        val greenLight = Paint().apply { color = Color.parseColor("#A5D6A7") }  // 加入（未到阈值）
-        val greenStrong = Paint().apply { color = Color.parseColor("#4CAF50") } // 加入（已到阈值）
+        val greenLight = Paint().apply { color = Color.parseColor("#A5D6A7") }  // 延后（未到阈值）
+        val greenStrong = Paint().apply { color = Color.parseColor("#4CAF50") } // 延后（已到阈值）
         // 滑过条目宽度的该比例即可触发（视觉变色点与触发点一致）。
         val swipeThreshold = 0.4f
         val rightTextPaint = Paint().apply {   // 删除文字（右对齐）
@@ -288,7 +170,7 @@ class MainActivity : AppCompatActivity() {
             textAlign = Paint.Align.RIGHT
             textSize = 44f
         }
-        val leftTextPaint = Paint().apply {     // 加入文字（左对齐）
+        val leftTextPaint = Paint().apply {     // 延后文字（左对齐）
             color = Color.WHITE
             isAntiAlias = true
             textAlign = Paint.Align.LEFT
@@ -321,23 +203,11 @@ class MainActivity : AppCompatActivity() {
                 if (item == null) return
 
                 if (direction == ItemTouchHelper.RIGHT) {
-                    // 右滑：加入本地3天后（写入 txt + 当前时间戳，隐藏 3 天后再显示）。
-                    if (localMode) {
-                        // 本地已到期条目：删掉旧记录，按当前时间重新延后 3 天。
-                        snoozeLocal(item.id, item.text)
-                    } else {
-                        // 云条目：写入本地成功后，从云端删除（相当于挪进本地3天后清单）。
-                        if (addToLocal(item.text) && item.id > 0) doDelete(item.id)
-                    }
+                    // 右滑：删掉待发布记录，重新写回「3天后」清单（再等 3 天）
+                    snoozeLocal(item.id, item.text)
                 } else {
-                    // 左滑：删除
-                    if (localMode) {
-                        deleteLocalAt(item.id)   // 本地模式下 id 即文件行索引
-                    } else if (item.id > 0) {
-                        doDelete(item.id)
-                    } else {
-                        toast("该条目无法删除")
-                    }
+                    // 左滑：删除（id 即 ready_to_release.txt 的行索引）
+                    deleteLocalAt(item.id)
                 }
             }
 
@@ -363,13 +233,13 @@ class MainActivity : AppCompatActivity() {
                         val y = v.top + (v.height + rightTextPaint.textSize) / 2f
                         c.drawText("删除", v.right - 30f, y, rightTextPaint)
                     } else if (dX > 0) {
-                        // 右滑：左侧「加入3天后」，未到阈值浅绿、到了深绿
+                        // 右滑：左侧「延后3天」，未到阈值浅绿、到了深绿
                         c.drawRect(
                             v.left.toFloat(), v.top.toFloat(), v.left + dX, v.bottom.toFloat(),
                             if (reached) greenStrong else greenLight
                         )
                         val y = v.top + (v.height + leftTextPaint.textSize) / 2f
-                        c.drawText("加入3天后", v.left + 30f, y, leftTextPaint)
+                        c.drawText("延后3天", v.left + 30f, y, leftTextPaint)
                     }
                 }
                 super.onChildDraw(c, rv, vh, dX, dY, actionState, isCurrentlyActive)
@@ -378,55 +248,56 @@ class MainActivity : AppCompatActivity() {
         ItemTouchHelper(callback).attachToRecyclerView(binding.recyclerView)
     }
 
-    // ---------- 本地「3天后」清单 ----------
-    /** 读取本地文件并显示：只显示已满 3 天的条目，未到期的隐藏。 */
+    // ---------- 本地清单 ----------
+    /**
+     * 先跑每日 8:00 检查（幂等：满 3 天的条目移入待发布清单并排程），
+     * 再只显示「发布时间已到」的条目。
+     */
     private fun loadLocalData() {
         showError(null)
+        try {
+            ReleaseStore.runDailyCheck(this)
+        } catch (e: Exception) {
+            // 无权限等：忽略，下面读取时会再报错
+        }
         val entries = try {
-            LocalStore.readEntries()
+            ReleaseStore.readEntries()
         } catch (e: Exception) {
             showError("读取本地文件失败：${e.message}")
             emptyList()
         }
         val now = System.currentTimeMillis()
-        val due = entries.filter { now >= it.dueAt }       // 已到期，显示
-        val waiting = entries.size - due.size              // 未到期，隐藏
+        val released = entries.filter { now >= it.releaseAt }   // 已发布，显示
+        val pending = entries.size - released.size               // 已排程未到时间，隐藏
+        val waiting3 = try {
+            LocalStore.readLines().size                          // 还没满 3 天的条目
+        } catch (e: Exception) {
+            0
+        }
 
-        // 把「已到期」条目数推送到桌面「剪贴板本地」小部件，并让其计时器归零
-        LocalWidgetProvider.pushCountFromApp(this, due.size)
+        // 把「已发布」条目数推送到桌面「剪贴板本地」小部件，并让其计时器归零
+        LocalWidgetProvider.pushCountFromApp(this, released.size)
 
         val rows = mutableListOf<Row>()
-        rows.add(Row.Header("本地3天后  (${due.size})"))
-        for (e in due) {
+        rows.add(Row.Header("已发布  (${released.size})"))
+        for (e in released) {
             // 界面上只显示内容，不显示时间戳（时间戳仅保留在 txt 文件中）
             rows.add(Row.Item(e.index, e.text, ""))        // id = 文件行索引，用于删除/延后
         }
         adapter.submit(rows)
-        binding.statusText.text =
-            if (waiting > 0) "本地3天后：${due.size} 条已到期，$waiting 条等待中"
-            else "本地3天后：${due.size} 条"
-        showError(if (due.isEmpty()) "没有已到期的本地条目" else null)
+
+        val parts = mutableListOf("已发布 ${released.size} 条")
+        if (pending > 0) parts.add("$pending 条待发布")
+        if (waiting3 > 0) parts.add("$waiting3 条等待满3天")
+        binding.statusText.text = parts.joinToString("，")
+        showError(if (released.isEmpty()) "暂时没有已发布的条目" else null)
     }
 
-    /** 把一条内容写入本地文件（附时间戳）。返回是否写入成功。 */
-    private fun addToLocal(text: String): Boolean {
-        if (!ensureStoragePermission()) return false
-        return try {
-            LocalStore.append(text)
-            toast("已加入本地3天后")
-            if (localMode) loadLocalData()
-            true
-        } catch (e: Exception) {
-            showError("写入失败：${e.message}")
-            false
-        }
-    }
-
-    /** 本地条目重新延后 3 天：删掉旧行，再以当前时间戳写回（于是又隐藏 3 天）。 */
+    /** 把已发布条目重新延后 3 天：从待发布清单删掉，再写回「3天后」清单（带当前时间戳）。 */
     private fun snoozeLocal(index: Int, text: String) {
         if (!ensureStoragePermission()) return
         try {
-            LocalStore.deleteAt(index)
+            ReleaseStore.deleteAt(index)
             LocalStore.append(text)
             toast("已延后到 3 天后")
             loadLocalData()
@@ -435,16 +306,27 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 删除本地文件的第 index 行。 */
+    /** 删除待发布清单的第 index 行。 */
     private fun deleteLocalAt(index: Int) {
         if (!ensureStoragePermission()) return
         try {
-            LocalStore.deleteAt(index)
+            ReleaseStore.deleteAt(index)
             toast("已删除")
             loadLocalData()
         } catch (e: Exception) {
             showError("删除失败：${e.message}")
         }
+    }
+
+    /** 长按条目：确认后删除。 */
+    private fun confirmDelete(item: Row.Item) {
+        val preview = if (item.text.length > 100) item.text.substring(0, 100) + "…" else item.text
+        AlertDialog.Builder(this)
+            .setTitle("删除条目")
+            .setMessage(preview)
+            .setPositiveButton("删除") { _, _ -> deleteLocalAt(item.id) }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     // ---------- 外部存储写权限 ----------
@@ -476,45 +358,6 @@ class MainActivity : AppCompatActivity() {
             requestWritePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
         return false
-    }
-
-    // ---------- 删除条目 ----------
-    private fun confirmDelete(item: Row.Item) {
-        if (item.id <= 0) {
-            toast("该条目无法删除")
-            return
-        }
-        val preview = if (item.text.length > 100) item.text.substring(0, 100) + "…" else item.text
-        AlertDialog.Builder(this)
-            .setTitle("删除条目")
-            .setMessage(preview)
-            .setPositiveButton("删除") { _, _ -> doDelete(item.id) }
-            .setNegativeButton("取消", null)
-            .show()
-    }
-
-    private fun doDelete(id: Int) {
-        val url = prefs.getString(KEY_URL, defaultUrl) ?: defaultUrl
-        val token = prefs.getString(KEY_TOKEN, "") ?: ""
-        setLoading(true)
-        lifecycleScope.launch {
-            try {
-                withContext(Dispatchers.IO) { ClipboardApi.deleteItem(url, token, id) }
-            } catch (e: ApiException) {
-                setLoading(false)
-                if (e.code == 401) { toast("登录已过期，请重新登录"); logout() }
-                else showError("删除失败：${e.message}")
-                return@launch
-            } catch (e: Exception) {
-                setLoading(false)
-                showError("删除失败：${e.message}")
-                return@launch
-            }
-            toast("已删除")
-            // 刷新列表计数与当前内容（loadData 会负责关闭 loading）
-            loadFolders()
-            loadData()
-        }
     }
 
     // ---------- 界面切换 ----------
@@ -552,11 +395,5 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_USER = "username"
         private const val KEY_TOKEN = "token"
         private const val KEY_EXP = "expires_at"
-        private const val DEFAULT_FOLDER = "记忆"   // 默认打开的收藏夹
-
-        // 小部件点击进入时携带的模式参数：云端小部件→云条目页，本地小部件→本地条目页
-        const val EXTRA_OPEN_MODE = "open_mode"
-        const val MODE_CLOUD = "cloud"
-        const val MODE_LOCAL = "local"
     }
 }

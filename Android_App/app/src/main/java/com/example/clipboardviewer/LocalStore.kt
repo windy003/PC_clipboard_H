@@ -13,8 +13,9 @@ import java.util.Locale
  * （即 /storage/emulated/0/1/local_3_days_later.txt）
  *
  * 每行一条记录，格式：`内容  2026/6/4  05:41`
- * 行尾时间戳是「加入时间」。条目在加入后 3 天内对 app 隐藏，
- * 满 3 天才会出现在本地列表中（“3 天后再显示”）。
+ * 行尾时间戳是「加入时间」。条目在加入后 3 天内留在本文件中（对 app 隐藏），
+ * 每天 8:00 由 ReleaseStore.runDailyCheck 检查：满 3 天的条目被移入
+ * ready_to_release.txt，再在当天 8:00-16:00 之间错峰发布显示（见 ReleaseStore）。
  * 内容中的换行会被替换为空格，保证一条记录占一行，便于按行读取/删除。
  *
  * 注意：写入外部存储根目录需要「所有文件访问」权限（见 MainActivity 的权限处理）。
@@ -33,9 +34,6 @@ object LocalStore {
 
     // 匹配行尾的时间戳，例如 "  2026/6/4  05:41"。
     private val TS_REGEX = Regex("""\s*\d{4}/\d{1,2}/\d{1,2}\s+\d{1,2}:\d{2}\s*$""")
-
-    /** 一条本地记录。index 为文件中的行号（用于删除）；dueAt 为「应显示时间」= 加入时间 + 3 天。 */
-    data class LocalEntry(val index: Int, val text: String, val dueAt: Long)
 
     /** 返回目标文件（必要时创建 `1` 目录）。 */
     fun file(): File {
@@ -58,29 +56,26 @@ object LocalStore {
         return f.readLines(Charsets.UTF_8).filter { it.isNotBlank() }
     }
 
-    /** 解析所有记录（含未到期的）。index 与 readLines 的顺序一致。 */
-    fun readEntries(): List<LocalEntry> =
-        readLines().mapIndexed { idx, line ->
-            val added = parseTimestamp(line)
-            // 解析不到时间戳的当作「已到期」（立即显示）。
-            val dueAt = if (added > 0) added + THREE_DAYS_MS else 0L
-            LocalEntry(idx, stripTimestamp(line), dueAt)
-        }
-
-    /** 只返回已到期（满 3 天）的记录——即本地列表应显示的内容。 */
-    fun dueEntries(): List<LocalEntry> {
+    /**
+     * 取出（移除并返回）所有已满 3 天的原始行（含时间戳），保持文件中的先后顺序。
+     * 供 ReleaseStore 每日 8:00 检查时把到期条目移入 ready_to_release.txt。
+     */
+    fun takeDueLines(): List<String> {
         val now = System.currentTimeMillis()
-        return readEntries().filter { now >= it.dueAt }
-    }
-
-    /** 删除第 index 行（基于 readLines/readEntries 的索引）。 */
-    fun deleteAt(index: Int) {
-        val lines = readLines().toMutableList()
-        if (index in lines.indices) {
-            lines.removeAt(index)
-            val content = if (lines.isEmpty()) "" else lines.joinToString("\n") + "\n"
+        val lines = readLines()
+        if (lines.isEmpty()) return emptyList()
+        val due = mutableListOf<String>()
+        val keep = mutableListOf<String>()
+        for (line in lines) {
+            val added = parseTimestamp(line)
+            val dueAt = if (added > 0) added + THREE_DAYS_MS else 0L
+            if (now >= dueAt) due.add(line) else keep.add(line)
+        }
+        if (due.isNotEmpty()) {
+            val content = if (keep.isEmpty()) "" else keep.joinToString("\n") + "\n"
             file().writeText(content, Charsets.UTF_8)
         }
+        return due
     }
 
     /** 去掉一行末尾的时间戳，得到原始内容。 */

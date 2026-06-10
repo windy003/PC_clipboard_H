@@ -20,16 +20,21 @@ import android.widget.RemoteViews
 import kotlin.concurrent.thread
 
 /**
- * 主屏小部件：每分钟检查一次本地「3天后」清单，显示已到期的条目数。
+ * 主屏小部件：每分钟做一次后台检查，显示本地「已发布」的条目数。
  *
- * 样式/颜色/大小与「剪贴板云端」(MemoryWidgetProvider) 完全一致，复用同一份布局
- * (memory_widget.xml)，只是标题与数据来源不同：
+ * 每次检查依次完成三件事：
+ *  1. CloudSync.syncOnce —— 云端有数据则转存到 local_3_days_later.txt 并删云端；
+ *  2. ReleaseStore.runDailyCheck —— 每天 8:00 把满 3 天的条目移入待发布清单并排程
+ *     （幂等，错过 8:00 自动补跑）；
+ *  3. 统计 ReleaseStore.releasedEntries() —— 发布时间已到的条目数，显示在小部件上。
+ *
+ * 三行布局（复用 memory_widget.xml）：
  *  - 剪贴板本地（橙色，固定标题）
- *  - N个（数字红色 + “个”绿色，已到期条目数）
- *  - X分钟前（红色计时器 + 蓝色“前”，距上次成功检查的时间）
+ *  - N个（数字红色 + “个”绿色，已发布条目数）
+ *  - X分钟前（红色计时器 + 蓝色“前”，距上次检查的时间）
  *
- * 数据来源是本地文件 LocalStore.dueEntries()（加入满 3 天才算到期），不需要联网/登录。
- * 与云端组件一样用 AlarmManager 每 60 秒触发一次刷新，Chronometer 每秒自动 +1。
+ * 系统小部件自带的 updatePeriodMillis 最短只能 30 分钟，无法满足“每分钟”，
+ * 因此用 AlarmManager 每 60 秒触发一次刷新，Chronometer 每秒自动 +1。
  */
 class LocalWidgetProvider : AppWidgetProvider() {
 
@@ -66,15 +71,28 @@ class LocalWidgetProvider : AppWidgetProvider() {
         updateAllWidgets(context)
     }
 
-    /** 后台读取本地已到期条目数，写入缓存后刷新所有小部件实例，并排下一次闹钟。 */
+    /** 后台执行：云端转存 → 每日 8:00 检查 → 统计已发布条目数，刷新小部件并排下一次闹钟。 */
     private fun refreshCount(context: Context) {
         val pending = goAsync()
         thread {
             val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             try {
+                // 1) 云端有数据则自动转存到本地（未登录/无权限/网络失败时内部直接跳过）
+                try {
+                    CloudSync.syncOnce(context)
+                } catch (e: Exception) {
+                    // 忽略，下次再试
+                }
+                // 2) 每日 8:00 检查：满 3 天的条目移入待发布清单并排程（幂等）
+                try {
+                    ReleaseStore.runDailyCheck(context)
+                } catch (e: Exception) {
+                    // 忽略，下次再试
+                }
                 val now = System.currentTimeMillis()
+                // 3) 统计「发布时间已到」的条目数
                 val count = try {
-                    LocalStore.dueEntries().size
+                    ReleaseStore.releasedEntries().size
                 } catch (e: Exception) {
                     // 读取失败（如暂无权限）：沿用上次条目数
                     prefs.getInt(KEY_WIDGET_COUNT, 0)
@@ -199,15 +217,13 @@ class LocalWidgetProvider : AppWidgetProvider() {
         return sp
     }
 
-    /** 点击小部件打开 App 并进入「本地条目」页。 */
+    /** 点击小部件打开 App 主页（本地清单）。 */
     private fun openAppPendingIntent(context: Context): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or
                 Intent.FLAG_ACTIVITY_SINGLE_TOP
-            putExtra(MainActivity.EXTRA_OPEN_MODE, MainActivity.MODE_LOCAL)
         }
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        // requestCode 与云端组件区分，避免 PendingIntent 互相覆盖
         return PendingIntent.getActivity(context, 1, intent, flags)
     }
 
@@ -249,12 +265,12 @@ class LocalWidgetProvider : AppWidgetProvider() {
         private const val ACTION_REFRESH = "com.example.clipboardviewer.LOCAL_WIDGET_REFRESH"
         private const val ACTION_REDRAW = "com.example.clipboardviewer.LOCAL_WIDGET_REDRAW"
         private const val INTERVAL_MS = 60_000L   // 每分钟检查一次
-        private const val WIDGET_TITLE = "剪贴板本地"   // 第一行标题（本地已到期条目数）
+        private const val WIDGET_TITLE = "剪贴板本地"   // 第一行标题（本地已发布条目数）
 
         private const val PREFS = "clipboard_viewer"
 
         /**
-         * 供主界面操作本地清单后调用：写入最新「已到期」条目数与当前时间（计时器归零），
+         * 供主界面操作本地清单后调用：写入最新「已发布」条目数与当前时间（计时器归零），
          * 并立即重绘小部件（不再触发后台读取）。
          */
         fun pushCountFromApp(context: Context, dueCount: Int) {

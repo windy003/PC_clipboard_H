@@ -31,22 +31,7 @@
             </intent-filter>
         </activity>
 
-        <!-- 「记忆」云端条目数小部件 -->
-        <receiver
-            android:name=".MemoryWidgetProvider"
-            android:label="剪贴板云端"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.example.clipboardviewer.WIDGET_REFRESH" />
-                <action android:name="com.example.clipboardviewer.WIDGET_REDRAW" />
-            </intent-filter>
-            <meta-data
-                android:name="android.appwidget.provider"
-                android:resource="@xml/memory_widget_info" />
-        </receiver>
-
-        <!-- 「本地3天后」已到期条目数小部件 -->
+        <!-- 本地「已发布」条目数小部件（后台同时负责云端转存与每日 8:00 检查） -->
         <receiver
             android:name=".LocalWidgetProvider"
             android:label="剪贴板本地"

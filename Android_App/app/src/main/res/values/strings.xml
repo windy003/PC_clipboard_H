@@ -1,5 +1,4 @@
 <resources>
     <string name="app_name">收藏夹查看器</string>
-    <string name="widget_memory_desc">显示「记忆」收藏夹的条目数，每分钟自动检查一次</string>
-    <string name="widget_local_desc">显示本地「3天后」已到期的条目数，每分钟自动检查一次</string>
+    <string name="widget_local_desc">显示本地「已发布」的条目数，每分钟自动检查一次</string>
 </resources>
