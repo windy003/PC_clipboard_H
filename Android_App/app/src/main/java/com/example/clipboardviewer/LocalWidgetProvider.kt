@@ -23,7 +23,8 @@ import kotlin.concurrent.thread
  * 主屏小部件：每分钟做一次后台检查，显示本地「已发布」的条目数。
  *
  * 每次检查依次完成三件事：
- *  1. CloudSync.syncOnce —— 云端有数据则转存到 local_3_days_later.txt 并删云端；
+ *  1. CloudSync.syncOnce —— 云端「记忆」夹有数据则转存到 local_3_days_later.txt 并删云端
+ *     （仅限「记忆」夹，其它收藏夹是 PC 端的长期数据，不能动）；
  *  2. ReleaseStore.runDailyCheck —— 每天 8:00 把满 3 天的条目移入待发布清单并排程
  *     （幂等，错过 8:00 自动补跑）；
  *  3. 统计 ReleaseStore.releasedEntries() —— 发布时间已到的条目数，显示在小部件上。
