@@ -199,10 +199,12 @@ class LocalWidgetProvider : AppWidgetProvider() {
         return sp
     }
 
-    /** 点击小部件打开 App 主页。 */
+    /** 点击小部件打开 App 并进入「本地条目」页。 */
     private fun openAppPendingIntent(context: Context): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(MainActivity.EXTRA_OPEN_MODE, MainActivity.MODE_LOCAL)
         }
         val flags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         // requestCode 与云端组件区分，避免 PendingIntent 互相覆盖

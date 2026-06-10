@@ -98,12 +98,34 @@ class MainActivity : AppCompatActivity() {
             override fun onNothingSelected(p: AdapterView<*>?) {}
         }
 
+        // 从小部件点进来时，按其携带的参数切换到「云条目」或「本地条目」模式
+        applyModeFromIntent(intent)
+
         if (hasValidToken()) {
             showContent()
             refresh()
         } else {
             showLogin()
         }
+    }
+
+    /** Activity 已存在时再次被小部件唤起：切换到对应模式并刷新。 */
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        if (intent != null && intent.hasExtra(EXTRA_OPEN_MODE)) {
+            setIntent(intent)
+            applyModeFromIntent(intent)
+            if (hasValidToken()) refresh()
+        }
+    }
+
+    /** 读取 Intent 中的模式参数并同步 localMode 与模式下拉框；没有参数则不动。 */
+    private fun applyModeFromIntent(intent: Intent?) {
+        val mode = intent?.getStringExtra(EXTRA_OPEN_MODE) ?: return
+        localMode = mode == MODE_LOCAL
+        suppressMode = true
+        binding.modeSpinner.setSelection(if (localMode) 1 else 0)
+        binding.modeSpinner.post { suppressMode = false }
     }
 
     // ---------- 登录态 ----------
@@ -531,5 +553,10 @@ class MainActivity : AppCompatActivity() {
         private const val KEY_TOKEN = "token"
         private const val KEY_EXP = "expires_at"
         private const val DEFAULT_FOLDER = "记忆"   // 默认打开的收藏夹
+
+        // 小部件点击进入时携带的模式参数：云端小部件→云条目页，本地小部件→本地条目页
+        const val EXTRA_OPEN_MODE = "open_mode"
+        const val MODE_CLOUD = "cloud"
+        const val MODE_LOCAL = "local"
     }
 }
