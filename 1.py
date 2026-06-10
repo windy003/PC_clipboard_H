@@ -1449,28 +1449,6 @@ class LoginDialog(QDialog):
             QMessageBox.critical(self, "登录失败", str(e))
 
 
-class CloudCountWorker(QThread):
-    """后台线程：从云端读取指定收藏夹的条目数，完成后用信号回传到主线程。
-
-    放后台是为了不阻塞 UI（网络请求可能耗时），且不改动主界面的 self.favorites。
-    """
-    finished_count = pyqtSignal(int, bool)  # (条目数, 是否成功)
-
-    def __init__(self, d1, folder, parent=None):
-        super().__init__(parent)
-        self.d1 = d1
-        self.folder = folder
-
-    def run(self):
-        try:
-            favorites = self.d1.load()
-            count = len(favorites.get(self.folder, []))
-            self.finished_count.emit(count, True)
-        except Exception as e:
-            print(f"云端读取「{self.folder}」条目数失败: {e}")
-            self.finished_count.emit(0, False)
-
-
 class CloudAppendWorker(QThread):
     """后台线程：把一条记忆「只追加」到云端（不影响其它收藏夹），完成后用信号回传。
 
@@ -1672,9 +1650,6 @@ class ClipboardHistoryApp(QMainWindow):
         
         # 创建系统托盘图标 (只调用一次)
         self.create_tray_icon()
-
-        # 创建显示「记忆」条目数的数字托盘图标（每分钟刷新）
-        self.create_count_tray_icon()
 
         # 创建全局热键管理器（使用 Windows 原生 RegisterHotKey，稳定可靠）
         self.hotkey_manager = GlobalHotkeyManager()
@@ -1932,100 +1907,6 @@ class ClipboardHistoryApp(QMainWindow):
         painter.setBrush(QColor(0, 120, 212))  # 使用蓝色
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(0, 0, 32, 32)
-        painter.end()
-        return QIcon(pixmap)
-
-    def create_count_tray_icon(self):
-        """创建第二个托盘图标，用数字显示「记忆」收藏夹的条目数，每分钟刷新。"""
-        self.count_tray_icon = QSystemTrayIcon(self)
-
-        # 右键菜单：刷新 / 显示主窗口 / 退出
-        menu = QMenu()
-        refresh_action = menu.addAction("刷新(&S)")  # 快捷键 S：手动刷新数据
-        refresh_action.triggered.connect(self.refresh_memory_count)
-        show_action = menu.addAction("显示主窗口")
-        show_action.triggered.connect(self.show_window)
-        menu.addSeparator()
-        quit_action = menu.addAction("退出(&X)")
-        quit_action.triggered.connect(QApplication.quit)
-        self.count_tray_icon.setContextMenu(menu)
-
-        # 双击与主托盘一致：显示/隐藏窗口
-        self.count_tray_icon.activated.connect(self.tray_icon_activated)
-        self.count_tray_icon.show()
-
-        # 先用本地数据立即显示一个数字，随后从云端拉取覆盖
-        self.update_memory_count_icon()
-        self.fetch_cloud_memory_count()
-
-        # 每分钟从云端刷新一次
-        self.count_timer = QTimer(self)
-        self.count_timer.timeout.connect(self.fetch_cloud_memory_count)
-        self.count_timer.start(60000)  # 60 秒
-
-    def update_memory_count_icon(self, count=None):
-        """刷新「记忆」条目数托盘图标及其提示；count 为 None 时用本地数据。"""
-        if count is None:
-            count = len(self.favorites.get("记忆", []))
-        self.count_tray_icon.setIcon(self.render_count_icon(count))
-        self.count_tray_icon.setToolTip(f"记忆文件夹：{count} 条目")
-
-    def fetch_cloud_memory_count(self):
-        """每分钟回调：在后台线程从云端读取「记忆」条目数并更新图标。
-
-        未配置云端或未登录时回退到本地数据；上一个查询还在进行时跳过本次。
-        """
-        if not (self.d1.enabled and self.d1.has_valid_token()):
-            self.update_memory_count_icon()  # 回退本地
-            return
-        worker = getattr(self, '_count_worker', None)
-        if worker is not None and worker.isRunning():
-            return  # 避免并发重复请求
-        self._count_worker = CloudCountWorker(self.d1, "记忆", self)
-        self._count_worker.finished_count.connect(self._on_cloud_count)
-        self._count_worker.start()
-
-    def _on_cloud_count(self, count, ok):
-        """云端查询结果回到主线程：成功用云端数，失败回退本地。"""
-        if ok:
-            self.update_memory_count_icon(count)
-        else:
-            self.update_memory_count_icon()
-
-    def refresh_memory_count(self):
-        """托盘右键「刷新(S)」：立即从云端读取「记忆」条目数并更新图标。"""
-        if self.d1.enabled and self.d1.has_valid_token():
-            self.fetch_cloud_memory_count()
-            self.count_tray_icon.showMessage(
-                "正在刷新", "正在从云端读取记忆文件夹条目数…",
-                QSystemTrayIcon.MessageIcon.Information, 1500)
-        else:
-            self.update_memory_count_icon()
-            count = len(self.favorites.get("记忆", []))
-            self.count_tray_icon.showMessage(
-                "刷新完成（本地）", f"记忆文件夹：{count} 条目（未登录云端）",
-                QSystemTrayIcon.MessageIcon.Information, 2000)
-
-    def render_count_icon(self, count):
-        """把条目数画成一个方底白字、尽量占满的托盘图标。"""
-        from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
-        size = 64
-        pixmap = QPixmap(size, size)
-        # 方形背景：整块填充，不留透明边
-        pixmap.fill(QColor("#2E7D32"))
-        painter = QPainter(pixmap)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing)
-
-        # 数字文本（超过 999 显示 999+）
-        text = str(count) if count <= 999 else "999+"
-        font = QFont()
-        font.setBold(True)
-        # 按位数自适应字号，尽量填满整个方形
-        font.setPixelSize({1: 60, 2: 50, 3: 38}.get(len(text), 28))
-        painter.setFont(font)
-        painter.setPen(QColor("#FFFFFF"))
-        painter.drawText(pixmap.rect(), int(Qt.AlignmentFlag.AlignCenter), text)
         painter.end()
         return QIcon(pixmap)
 
@@ -2810,11 +2691,6 @@ class ClipboardHistoryApp(QMainWindow):
             if self.current_folder == MEMORY_FOLDER:
                 self.change_folder(MEMORY_FOLDER)  # 刷新列表显示
             self.show_toast("成功,记忆已同步到云端", 1500)
-            # 刷新「记忆」数字托盘图标（从云端读取最新条目数）
-            try:
-                self.fetch_cloud_memory_count()
-            except Exception:
-                pass
         else:
             # 失败：保留在本地待发队列，下次添加新记忆或重启后会重试
             self.show_toast("失败,未能同步到云端,已留在本地待重试", 2000)
