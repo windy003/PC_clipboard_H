@@ -1992,6 +1992,11 @@ class ClipboardHistoryApp(QMainWindow):
               event.key() == Qt.Key.Key_J and
               self.stacked_widget.currentIndex() == 0):
             self.move_history_to_memory()
+        # Alt+J：在「记忆」收藏夹面板，将高亮选中的条目上传到云端
+        elif (event.modifiers() == Qt.KeyboardModifier.AltModifier and
+              event.key() == Qt.Key.Key_J and
+              self.stacked_widget.currentIndex() == 1):
+            self.upload_selected_memory_to_cloud()
         elif (event.modifiers() == Qt.KeyboardModifier.AltModifier and
               self.stacked_widget.currentIndex() == 1):
             if event.key() == Qt.Key.Key_Up:
@@ -2652,8 +2657,11 @@ class ClipboardHistoryApp(QMainWindow):
         self._flush_pending_memory()
         return True
 
-    def _flush_pending_memory(self):
-        """把本地「记忆」待发队列里尚未在途的条目逐条「只追加」到云端。"""
+    def _flush_pending_memory(self, only_text=None):
+        """把本地「记忆」待发队列里尚未在途的条目逐条「只追加」到云端。
+
+        传入 only_text 时只上传该条（用于在「记忆」收藏夹里手动上传高亮选中项）。
+        """
         MEMORY_FOLDER = "记忆"
         if not (self.d1.enabled and self.d1.has_valid_token()):
             return
@@ -2665,6 +2673,8 @@ class ClipboardHistoryApp(QMainWindow):
         for item in list(self.favorites.get(MEMORY_FOLDER, [])):
             text = item["text"] if isinstance(item, dict) else str(item)
             if not text or text in self._memory_inflight:
+                continue
+            if only_text is not None and text != only_text:
                 continue
             self._memory_inflight.add(text)
             worker = CloudAppendWorker(self.d1, MEMORY_FOLDER, text, self)
@@ -2703,6 +2713,33 @@ class ClipboardHistoryApp(QMainWindow):
 
         text = self.clipboard_history[current_row]
         self._send_to_memory(text)
+
+    def upload_selected_memory_to_cloud(self):
+        """在「记忆」收藏夹面板：将高亮选中的条目上传到云端（同步成功后本地自动删除）。
+
+        与历史面板的 Alt+J 一致，只是这里条目本就在「记忆」待发队列中，直接复用
+        _flush_pending_memory 把选中的这一条「只追加」到云端。
+        """
+        MEMORY_FOLDER = "记忆"
+        if self.current_folder != MEMORY_FOLDER:
+            return
+        current_row = self.favorites_list.currentRow()
+        items = self.favorites.get(MEMORY_FOLDER, [])
+        if current_row < 0 or current_row >= len(items):
+            return
+
+        # 出箱依赖云端：未登录则无法同步，直接告知用户
+        if not (self.d1.enabled and self.d1.has_valid_token()):
+            self.show_toast("失败,未登录云端,无法同步记忆", 1500)
+            return
+
+        item = items[current_row]
+        text = item["text"] if isinstance(item, dict) else str(item)
+        if not text:
+            return
+
+        self.show_toast("正在同步记忆到云端…", 1000)
+        self._flush_pending_memory(only_text=text)
 
     def move_latest_clipboard_to_memory(self):
         """全局热键(Alt+Y)回调：模拟 Ctrl+C 复制当前选中的文字，并存入「记忆」收藏夹。
