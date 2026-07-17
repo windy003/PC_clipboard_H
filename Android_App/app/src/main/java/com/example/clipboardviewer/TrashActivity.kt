@@ -66,6 +66,7 @@ class TrashActivity : AppCompatActivity() {
     private fun loadTrash() {
         showError(null)
         val entries = try {
+            TrashStore.purgeExpired()   // 先清理超过 1 天的条目
             TrashStore.readEntries()
         } catch (e: Exception) {
             showError("读取垃圾箱失败：${e.message}")

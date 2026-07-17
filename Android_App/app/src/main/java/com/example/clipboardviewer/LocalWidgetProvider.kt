@@ -90,6 +90,12 @@ class LocalWidgetProvider : AppWidgetProvider() {
                 } catch (e: Exception) {
                     // 忽略，下次再试
                 }
+                // 2.5) 清理垃圾箱：超过 1 天的条目自动彻底删除（即使不打开垃圾箱界面）
+                try {
+                    TrashStore.purgeExpired()
+                } catch (e: Exception) {
+                    // 忽略，下次再试
+                }
                 val now = System.currentTimeMillis()
                 // 3) 统计「发布时间已到」的条目数
                 val count = try {

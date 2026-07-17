@@ -182,6 +182,11 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             // 无权限等：忽略，下面读取时会再报错
         }
+        try {
+            TrashStore.purgeExpired()   // 清理垃圾箱中超过 1 天的条目
+        } catch (e: Exception) {
+            // 无权限等：忽略
+        }
         val entries = try {
             ReleaseStore.readEntries()
         } catch (e: Exception) {
