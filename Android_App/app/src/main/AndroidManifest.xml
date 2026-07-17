@@ -31,6 +31,12 @@
             </intent-filter>
         </activity>
 
+        <!-- 垃圾箱界面 -->
+        <activity
+            android:name=".TrashActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity" />
+
         <!-- 本地「已发布」条目数小部件（后台同时负责云端转存与每日 8:00 检查） -->
         <receiver
             android:name=".LocalWidgetProvider"

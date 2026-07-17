@@ -12,8 +12,8 @@ import java.util.Locale
 /**
  * 「待发布」清单 ready_to_release.txt 的读写与每日发布排程。
  *
- * 文件位置：外部存储根目录 / 1 / ready_to_release.txt
- * （即 /storage/emulated/0/1/ready_to_release.txt）
+ * 文件位置：外部存储根目录 / 1 / clipboard_to_remember / ready_to_release.txt
+ * （即 /storage/emulated/0/1/clipboard_to_remember/ready_to_release.txt）
  *
  * 流程：
  *  1. 每天 8:00 做一次检查（runDailyCheck，幂等；错过 8:00 时下次调用自动补跑）：
@@ -32,7 +32,7 @@ import java.util.Locale
  *  - "=>" 后是当天排程的发布时间；尚未排程的行没有该标记，下次 8:00 检查时补上。
  */
 object ReleaseStore {
-    private const val DIR = "1"
+    private const val DIR = "1/clipboard_to_remember"
     private const val FILE = "ready_to_release.txt"
 
     private const val RELEASE_HOUR = 8                       // 每天 8:00 检查并排程
@@ -50,7 +50,7 @@ object ReleaseStore {
     /** 一条待发布记录。index 为文件行号（用于删除）；releaseAt 为发布时间，未排程时为 Long.MAX_VALUE。 */
     data class ReleaseEntry(val index: Int, val text: String, val releaseAt: Long)
 
-    /** 返回目标文件（必要时创建 `1` 目录）。 */
+    /** 返回目标文件（必要时递归创建 `1/clipboard_to_remember` 目录）。 */
     fun file(): File {
         val dir = File(Environment.getExternalStorageDirectory(), DIR)
         if (!dir.exists()) dir.mkdirs()

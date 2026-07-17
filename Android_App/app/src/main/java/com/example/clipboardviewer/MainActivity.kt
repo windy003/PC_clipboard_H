@@ -4,9 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -19,9 +16,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 import com.example.clipboardviewer.databinding.ActivityMainBinding
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -60,6 +55,13 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // 一次性把旧位置 /1/*.txt 搬到 /1/clipboard_to_remember/（幂等，无权限时下次补搬）
+        try {
+            StoreMigration.migrateIfNeeded()
+        } catch (e: Exception) {
+            // 迁移失败不阻塞启动，下次再试
+        }
+
         binding.recyclerView.layoutManager = LinearLayoutManager(this)
         binding.recyclerView.adapter = adapter
         attachSwipe()
@@ -70,6 +72,7 @@ class MainActivity : AppCompatActivity() {
         binding.loginButton.setOnClickListener { doLogin() }
         binding.refreshButton.setOnClickListener { refresh() }
         binding.logoutButton.setOnClickListener { logout() }
+        binding.trashButton.setOnClickListener { openTrash() }
 
         if (hasValidToken()) {
             showContent()
@@ -155,97 +158,16 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // ---------- 滑动手势：左滑删除 / 右滑重新延后3天 ----------
+    // ---------- 滑动手势：左滑移入垃圾箱 / 右滑重新延后3天 ----------
     private fun attachSwipe() {
-        // 浅色 = 还没滑够，松手不执行；深色 = 已达阈值，松手即执行。
-        val redLight = Paint().apply { color = Color.parseColor("#EF9A9A") }    // 删除（未到阈值）
-        val redStrong = Paint().apply { color = Color.parseColor("#F44336") }   // 删除（已到阈值）
-        val greenLight = Paint().apply { color = Color.parseColor("#A5D6A7") }  // 延后（未到阈值）
-        val greenStrong = Paint().apply { color = Color.parseColor("#4CAF50") } // 延后（已到阈值）
-        // 滑过条目宽度的该比例即可触发（视觉变色点与触发点一致）。
-        val swipeThreshold = 0.4f
-        val rightTextPaint = Paint().apply {   // 删除文字（右对齐）
-            color = Color.WHITE
-            isAntiAlias = true
-            textAlign = Paint.Align.RIGHT
-            textSize = 44f
-        }
-        val leftTextPaint = Paint().apply {     // 延后文字（左对齐）
-            color = Color.WHITE
-            isAntiAlias = true
-            textAlign = Paint.Align.LEFT
-            textSize = 44f
-        }
-
-        val callback = object :
-            ItemTouchHelper.SimpleCallback(0, ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT) {
-            override fun onMove(
-                rv: RecyclerView,
-                vh: RecyclerView.ViewHolder,
-                target: RecyclerView.ViewHolder
-            ): Boolean = false
-
-            // 只允许"条目行"滑动，标题行不可滑
-            override fun getSwipeDirs(rv: RecyclerView, vh: RecyclerView.ViewHolder): Int {
-                val pos = vh.bindingAdapterPosition
-                return if (pos != RecyclerView.NO_POSITION && adapter.itemAt(pos) != null)
-                    ItemTouchHelper.LEFT or ItemTouchHelper.RIGHT else 0
-            }
-
-            // 触发阈值：与下面变色点保持一致。
-            override fun getSwipeThreshold(vh: RecyclerView.ViewHolder): Float = swipeThreshold
-
-            override fun onSwiped(vh: RecyclerView.ViewHolder, direction: Int) {
-                val pos = vh.bindingAdapterPosition
-                val item = if (pos != RecyclerView.NO_POSITION) adapter.itemAt(pos) else null
-                // 先把该行恢复显示（操作完成后会整体刷新列表；失败则保留该行）
-                if (pos != RecyclerView.NO_POSITION) adapter.notifyItemChanged(pos)
-                if (item == null) return
-
-                if (direction == ItemTouchHelper.RIGHT) {
-                    // 右滑：删掉待发布记录，重新写回「3天后」清单（再等 3 天）
-                    snoozeLocal(item.id, item.text)
-                } else {
-                    // 左滑：删除（id 即 ready_to_release.txt 的行索引）
-                    deleteLocalAt(item.id)
-                }
-            }
-
-            override fun onChildDraw(
-                c: Canvas,
-                rv: RecyclerView,
-                vh: RecyclerView.ViewHolder,
-                dX: Float,
-                dY: Float,
-                actionState: Int,
-                isCurrentlyActive: Boolean
-            ) {
-                if (actionState == ItemTouchHelper.ACTION_STATE_SWIPE) {
-                    val v = vh.itemView
-                    // 是否已滑过触发阈值（达到则用深色，提示松手即执行）
-                    val reached = v.width > 0 && Math.abs(dX) >= v.width * swipeThreshold
-                    if (dX < 0) {
-                        // 左滑：右侧「删除」，未到阈值浅红、到了深红
-                        c.drawRect(
-                            v.right + dX, v.top.toFloat(), v.right.toFloat(), v.bottom.toFloat(),
-                            if (reached) redStrong else redLight
-                        )
-                        val y = v.top + (v.height + rightTextPaint.textSize) / 2f
-                        c.drawText("删除", v.right - 30f, y, rightTextPaint)
-                    } else if (dX > 0) {
-                        // 右滑：左侧「延后3天」，未到阈值浅绿、到了深绿
-                        c.drawRect(
-                            v.left.toFloat(), v.top.toFloat(), v.left + dX, v.bottom.toFloat(),
-                            if (reached) greenStrong else greenLight
-                        )
-                        val y = v.top + (v.height + leftTextPaint.textSize) / 2f
-                        c.drawText("延后3天", v.left + 30f, y, leftTextPaint)
-                    }
-                }
-                super.onChildDraw(c, rv, vh, dX, dY, actionState, isCurrentlyActive)
-            }
-        }
-        ItemTouchHelper(callback).attachToRecyclerView(binding.recyclerView)
+        SwipeUi.attach(
+            recyclerView = binding.recyclerView,
+            adapter = adapter,
+            leftLabel = "删除",       // 左滑：移入垃圾箱
+            rightLabel = "延后3天",   // 右滑：重新等 3 天
+            onLeft = { item -> moveToTrash(item.id, item.text) },
+            onRight = { item -> snoozeLocal(item.id, item.text) },
+        )
     }
 
     // ---------- 本地清单 ----------
@@ -306,27 +228,33 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** 删除待发布清单的第 index 行。 */
-    private fun deleteLocalAt(index: Int) {
+    /** 把待发布清单第 index 行移入垃圾箱（从 ready_to_release.txt 删除，写入 trash.txt）。 */
+    private fun moveToTrash(index: Int, text: String) {
         if (!ensureStoragePermission()) return
         try {
+            TrashStore.append(text)
             ReleaseStore.deleteAt(index)
-            toast("已删除")
+            toast("已移入垃圾箱")
             loadLocalData()
         } catch (e: Exception) {
             showError("删除失败：${e.message}")
         }
     }
 
-    /** 长按条目：确认后删除。 */
+    /** 长按条目：确认后移入垃圾箱。 */
     private fun confirmDelete(item: Row.Item) {
         val preview = if (item.text.length > 100) item.text.substring(0, 100) + "…" else item.text
         AlertDialog.Builder(this)
-            .setTitle("删除条目")
+            .setTitle("移入垃圾箱")
             .setMessage(preview)
-            .setPositiveButton("删除") { _, _ -> deleteLocalAt(item.id) }
+            .setPositiveButton("移入垃圾箱") { _, _ -> moveToTrash(item.id, item.text) }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    /** 打开垃圾箱界面。 */
+    private fun openTrash() {
+        startActivity(Intent(this, TrashActivity::class.java))
     }
 
     // ---------- 外部存储写权限 ----------

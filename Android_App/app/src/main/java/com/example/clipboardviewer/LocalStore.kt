@@ -9,8 +9,8 @@ import java.util.Locale
 /**
  * 本地「3天后」清单的读写。
  *
- * 文件位置：外部存储根目录 / 1 / local_3_days_later.txt
- * （即 /storage/emulated/0/1/local_3_days_later.txt）
+ * 文件位置：外部存储根目录 / 1 / clipboard_to_remember / local_3_days_later.txt
+ * （即 /storage/emulated/0/1/clipboard_to_remember/local_3_days_later.txt）
  *
  * 每行一条记录，格式：`内容  2026/6/4  05:41`
  * 行尾时间戳是「加入时间」。条目在加入后 3 天内留在本文件中（对 app 隐藏），
@@ -21,7 +21,7 @@ import java.util.Locale
  * 注意：写入外部存储根目录需要「所有文件访问」权限（见 MainActivity 的权限处理）。
  */
 object LocalStore {
-    private const val DIR = "1"
+    private const val DIR = "1/clipboard_to_remember"
     private const val FILE = "local_3_days_later.txt"
 
     private const val THREE_DAYS_MS = 3L * 24 * 60 * 60 * 1000
@@ -35,7 +35,7 @@ object LocalStore {
     // 匹配行尾的时间戳，例如 "  2026/6/4  05:41"。
     private val TS_REGEX = Regex("""\s*\d{4}/\d{1,2}/\d{1,2}\s+\d{1,2}:\d{2}\s*$""")
 
-    /** 返回目标文件（必要时创建 `1` 目录）。 */
+    /** 返回目标文件（必要时递归创建 `1/clipboard_to_remember` 目录）。 */
     fun file(): File {
         val dir = File(Environment.getExternalStorageDirectory(), DIR)
         if (!dir.exists()) dir.mkdirs()
