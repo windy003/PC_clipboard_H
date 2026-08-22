@@ -61,6 +61,17 @@
         android:visibility="gone">
 
         <TextView
+            android:id="@+id/permissionBanner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="8dp"
+            android:background="#FFF3E0"
+            android:padding="8dp"
+            android:text="需要「所有文件访问」权限才能同步云端记忆，点此去开启"
+            android:textColor="#E65100"
+            android:visibility="gone" />
+
+        <TextView
             android:id="@+id/statusText"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

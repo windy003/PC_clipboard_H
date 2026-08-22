@@ -48,7 +48,11 @@ class MainActivity : AppCompatActivity() {
     private val requestWritePermission =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) toast("已授予存储权限，请重新操作") else toast("未授予存储权限，无法写入")
+            updatePermissionBanner()
         }
+
+    // 记录上次已知的权限状态，用于从「设置」返回时检测是否刚刚被授权
+    private var lastKnownHasPermission = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -73,6 +77,9 @@ class MainActivity : AppCompatActivity() {
         binding.refreshButton.setOnClickListener { refresh() }
         binding.logoutButton.setOnClickListener { logout() }
         binding.trashButton.setOnClickListener { openTrash() }
+        binding.permissionBanner.setOnClickListener { ensureStoragePermission() }
+
+        lastKnownHasPermission = hasStoragePermission()
 
         if (hasValidToken()) {
             showContent()
@@ -80,12 +87,26 @@ class MainActivity : AppCompatActivity() {
         } else {
             showLogin()
         }
+
+        maybeRequestStoragePermission()
     }
 
     /** 从小部件再次进入时刷新一遍。 */
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         if (hasValidToken()) refresh()
+    }
+
+    /** 从「设置」页返回时会走这里：检测权限是否刚被授予，是则自动补一次同步。 */
+    override fun onResume() {
+        super.onResume()
+        val nowHas = hasStoragePermission()
+        updatePermissionBanner()
+        if (nowHas && !lastKnownHasPermission && hasValidToken()) {
+            toast("已获得权限，正在补一次同步…")
+            refresh()
+        }
+        lastKnownHasPermission = nowHas
     }
 
     // ---------- 登录态 ----------
@@ -291,6 +312,27 @@ class MainActivity : AppCompatActivity() {
             requestWritePermission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         }
         return false
+    }
+
+    /**
+     * 启动时若缺少权限主动弹窗提醒（而不是等用户手动滑动才发现）。
+     * 云端「记忆」夹的自动转存（CloudSync）依赖这个权限，缺失时会静默不同步、且没有任何提示，
+     * 所以必须在这里主动引导，否则用户根本发现不了为什么记忆一直下载不下来。
+     */
+    private fun maybeRequestStoragePermission() {
+        updatePermissionBanner()
+        if (hasStoragePermission()) return
+        AlertDialog.Builder(this)
+            .setTitle("需要「所有文件访问」权限")
+            .setMessage("云端「记忆」夹的内容要靠这个权限才能自动转存到本地，不开启的话会一直同步不下来，也不会有任何提示。")
+            .setPositiveButton("去开启") { _, _ -> ensureStoragePermission() }
+            .setNegativeButton("暂不", null)
+            .show()
+    }
+
+    /** 权限缺失时常驻显示顶部提示条，点击可直接跳转设置。 */
+    private fun updatePermissionBanner() {
+        binding.permissionBanner.visibility = if (hasStoragePermission()) View.GONE else View.VISIBLE
     }
 
     // ---------- 界面切换 ----------
