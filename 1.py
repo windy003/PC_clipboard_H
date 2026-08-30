@@ -739,11 +739,12 @@ class SearchDialog(QDialog):
         # 隐藏的combo用于存储当前选中的范围值
         self.scope_combo = QComboBox()
         self.scope_combo.addItems(["全部", "历史记录", "当前收藏夹", "所有收藏夹"])
+        self.scope_combo.setCurrentText("所有收藏夹")
         self.scope_combo.currentIndexChanged.connect(self.on_search_option_changed)
         self.scope_combo.hide()
 
         # 下拉菜单按钮
-        self.scope_menu_button = QPushButton("全部(&X)")
+        self.scope_menu_button = QPushButton("所有收藏夹(&X)")
         scope_menu = QMenu(self)
         for scope in ["全部", "历史记录", "当前收藏夹", "所有收藏夹"]:
             action = scope_menu.addAction(scope)
