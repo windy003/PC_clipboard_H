@@ -2507,17 +2507,12 @@ class ClipboardHistoryApp(QMainWindow):
             
             # 生成新编号
             number = i + 1
-            if number <= 9:
-                # 1-9: 直接数字
-                prefix = f"{number}. "
-            else:
-                # 10及以上: 根据十位数确定点号数量
-                # 10-19: 1个点 (.10, .11, ...)
-                # 20-29: 2个点 (..20, ..21, ...)
-                # 30-39: 3个点 (...30, ...)
-                # 以此类推
-                dot_count = number // 10
-                prefix = f"{'.' * dot_count}{number}. "
+            # 点号数量 = 位数 - 1
+            # 1-9: 不加点 (1. 2. ...)
+            # 10-99: 1个点 (.10, .25, .99)
+            # 100-999: 2个点 (..100, ..347)
+            dot_count = len(str(number)) - 1
+            prefix = f"{'.' * dot_count}{number}. "
             
             item.setText(f"{prefix}{text}")
 
@@ -3013,21 +3008,10 @@ class ClipboardHistoryApp(QMainWindow):
             number = int(number_str)
             
             # 根据点号数量和数字计算实际索引
-            if dot_count == 0:
-                # 直接数字 1-9
-                if 1 <= number <= 9:
-                    index = number - 1
-                else:
-                    return
-            else:
-                # 有点号的情况
-                # 验证数字是否在正确的范围内
-                expected_range_start = dot_count * 10
-                expected_range_end = expected_range_start + 9
-                if expected_range_start <= number <= expected_range_end:
-                    index = number - 1
-                else:
-                    return
+            # n 个点对应 n+1 位数字，位数凑齐即为一次完整输入
+            if not self.is_complete_number_input(dot_count, number):
+                return
+            index = number - 1
             
             # 跳转到对应条目
             current_list = self.history_list if self.stacked_widget.currentIndex() == 0 else self.favorites_list
@@ -3045,14 +3029,13 @@ class ClipboardHistoryApp(QMainWindow):
             pass
     
     def is_complete_number_input(self, dot_count, number):
-        """判断是否是完整的编号输入"""
+        """判断是否是完整的编号输入（点号数量 = 位数 - 1）"""
         if dot_count == 0:
             return 1 <= number <= 9
-        else:
-            # 有点号的情况
-            expected_range_start = dot_count * 10
-            expected_range_end = expected_range_start + 9
-            return expected_range_start <= number <= expected_range_end
+        # n 个点对应 n+1 位数字：1个点 -> 10-99，2个点 -> 100-999
+        expected_range_start = 10 ** dot_count
+        expected_range_end = 10 ** (dot_count + 1) - 1
+        return expected_range_start <= number <= expected_range_end
 
 
     def delete_history_item(self):
