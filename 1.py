@@ -11,9 +11,9 @@ import keyboard
 import time
 import re
 import traceback
+from html import escape
 import ctypes
 from ctypes import wintypes
-from pynput.keyboard import Key, Controller
 
 from d1_storage import D1Storage, load_env_file
 
@@ -22,41 +22,62 @@ from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
 
 
+def _short_preview(text, limit=10):
+    """取文本前 limit 个字符用于提示，超出部分用 ... 代替。
+
+    换行/连续空白先压成单个空格，避免提示框被撑成多行。
+    """
+    one_line = " ".join(str(text).split())
+    if len(one_line) <= limit:
+        return one_line
+    return one_line[:limit] + "..."
+
+
 def _win_clipboard_text():
-    """用 Windows API 直接读取剪贴板里的 Unicode 文本（Qt 偶尔读不到他进程刚写入的内容时兜底）。"""
+    """用 Windows API 直接读取剪贴板里的 Unicode 文本（Qt 偶尔读不到时兜底）。
+
+    关键点：GetClipboardData 返回的是句柄，在 64 位下必须显式声明 restype，
+    否则会被截断成 32 位；读取长度也要用 GlobalSize 限定，避免读越界
+    （越界读会直接让进程崩溃）。
+    """
     CF_UNICODETEXT = 13
-    u = ctypes.windll.user32
-    k = ctypes.windll.kernel32
-    if not u.OpenClipboard(0):
+    user32 = ctypes.WinDLL('user32', use_last_error=True)
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+
+    user32.OpenClipboard.argtypes = [wintypes.HWND]
+    user32.OpenClipboard.restype = wintypes.BOOL
+    user32.GetClipboardData.argtypes = [wintypes.UINT]
+    user32.GetClipboardData.restype = wintypes.HANDLE
+    user32.CloseClipboard.argtypes = []
+    user32.CloseClipboard.restype = wintypes.BOOL
+
+    kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalUnlock.restype = wintypes.BOOL
+    kernel32.GlobalSize.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalSize.restype = ctypes.c_size_t
+
+    if not user32.OpenClipboard(None):
         return None
     try:
-        h = u.GetClipboardData(CF_UNICODETEXT)
+        h = user32.GetClipboardData(CF_UNICODETEXT)
         if not h:
             return ''
-        k.GlobalLock.restype = ctypes.c_void_p
-        k.GlobalLock.argtypes = [ctypes.c_void_p]
-        ptr = k.GlobalLock(h)
+        ptr = kernel32.GlobalLock(h)
         if not ptr:
             return ''
         try:
-            return ctypes.c_wchar_p(ptr).value
+            size = kernel32.GlobalSize(h)
+            if size < 2:
+                return ''
+            raw = ctypes.string_at(ptr, size)
+            # UTF-16LE，截到第一个 NUL 结束符为止
+            return raw.decode('utf-16-le', errors='ignore').split('\x00', 1)[0]
         finally:
-            k.GlobalUnlock(h)
+            kernel32.GlobalUnlock(h)
     finally:
-        u.CloseClipboard()
-
-
-def _any_key_down():
-    """检测键盘上是否还有任意按键（不含鼠标键）处于按下状态。"""
-    try:
-        gaks = ctypes.windll.user32.GetAsyncKeyState
-        # 跳过 0x01-0x07 的鼠标键，检查其余虚拟键码
-        for vk in range(0x08, 0xFF):
-            if gaks(vk) & 0x8000:
-                return True
-    except Exception:
-        pass
-    return False
+        user32.CloseClipboard()
 
 
 # ===== 全局热键：使用 Windows 原生 RegisterHotKey =====
@@ -612,6 +633,8 @@ class ToastNotification(QWidget):
         inner.setContentsMargins(28, 16, 28, 16)
         self.label = QLabel("")
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # 允许消息里用 <span style="color:..."> 给部分文字单独着色
+        self.label.setTextFormat(Qt.TextFormat.RichText)
         inner.addWidget(self.label)
         outer.addWidget(self.frame)
 
@@ -638,7 +661,9 @@ class ToastNotification(QWidget):
             # 居中到鼠标所在屏幕（多屏时定位更准确）
             from PyQt6.QtGui import QCursor
             screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
-            geo = screen.geometry()
+            if screen is None:
+                screen = QApplication.screens()[0] if QApplication.screens() else None
+            geo = screen.geometry() if screen is not None else self.geometry()
             x = geo.center().x() - self.width() // 2
             y = geo.center().y() - self.height() // 2
             self.move(x, y)
@@ -1453,8 +1478,8 @@ class LoginDialog(QDialog):
 class CloudAppendWorker(QThread):
     """后台线程：把一条记忆「只追加」到云端（不影响其它收藏夹），完成后用信号回传。
 
-    出箱模式专用：成功后主线程会把这条从本地待发队列删除（之后不再上传），
-    失败则保留在本地以便下次重试。放后台是为了不阻塞 UI。
+    出箱模式专用：成功后主线程会把这条标记为 synced（之后不再上传），
+    失败则保留为待发状态以便下次重试。放后台是为了不阻塞 UI。
     """
     finished_append = pyqtSignal(str, bool, str)  # (text, 是否成功, 错误信息)
 
@@ -1697,10 +1722,10 @@ class ClipboardHistoryApp(QMainWindow):
         terminal_memory_hotkey = self.config.get('terminal_memory_hotkey', 'alt+d')
         ok_main = self.hotkey_manager.register('main', main_hotkey, self.toggle_window)
         ok_search = self.hotkey_manager.register('search', search_hotkey, self.show_search_dialog)
-        # Alt+Y：全局热键，模拟 Ctrl+C 复制选中文字并存入「记忆」收藏夹（适合普通窗口）
-        self.hotkey_manager.register('memory', memory_hotkey, self.move_latest_clipboard_to_memory)
-        # Alt+D：全局热键，模拟鼠标右键点击复制选中内容并存入「记忆」收藏夹（适合终端）
-        self.hotkey_manager.register('terminal_memory', terminal_memory_hotkey, self.move_terminal_selection_to_memory)
+        # 同步剪贴板到「记忆」：先自己 Ctrl+C 复制，再按热键
+        self.hotkey_manager.register('memory', memory_hotkey, self.sync_clipboard_to_memory)
+        # 第二个同步热键（终端/普通窗口通用，行为与上面一致）
+        self.hotkey_manager.register('terminal_memory', terminal_memory_hotkey, self.sync_clipboard_to_memory)
         if (not ok_main or not ok_search) and hasattr(self, 'tray_icon'):
             self.tray_icon.showMessage(
                 "热键注册失败",
@@ -1863,12 +1888,12 @@ class ClipboardHistoryApp(QMainWindow):
         search_hotkey_action = tray_menu.addAction("重新设置搜索快捷键")
         search_hotkey_action.triggered.connect(self.show_search_hotkey_settings)
 
-        # 设置普通界面复制文本并移到记忆快捷键（模拟 Ctrl+C）
-        memory_hotkey_action = tray_menu.addAction("设置普通界面复制文本并移到记忆快捷键")
+        # 设置「复制后同步剪贴板到记忆」快捷键
+        memory_hotkey_action = tray_menu.addAction("设置同步剪贴板到记忆快捷键")
         memory_hotkey_action.triggered.connect(self.show_memory_hotkey_settings)
 
-        # 设置终端界面复制文本并移到记忆快捷键（模拟鼠标右键）
-        terminal_memory_hotkey_action = tray_menu.addAction("设置终端界面复制文本并移到记忆快捷键")
+        # 设置第二个同步快捷键（终端/普通窗口通用）
+        terminal_memory_hotkey_action = tray_menu.addAction("设置终端同步剪贴板到记忆快捷键")
         terminal_memory_hotkey_action.triggered.connect(self.show_terminal_memory_hotkey_settings)
 
         self.delete_history = []
@@ -2049,14 +2074,22 @@ class ClipboardHistoryApp(QMainWindow):
         """删除选中的收藏项"""
         current_row = self.favorites_list.currentRow()
         if current_row >= 0:  # 确保有选中的项目
+            current_item = self.favorites[self.current_folder][current_row]
+            # 「记忆」夹里已同步的条目只在云端保管，本机删除不会影响云端
+            removing_synced_memory = (
+                self.current_folder == "记忆"
+                and isinstance(current_item, dict)
+                and current_item.get("synced")
+            )
+
             # 保存删除信息用于撤销
             deleted_item = {
                 'folder': self.current_folder,
-                'item': self.favorites[self.current_folder][current_row],
+                'item': current_item,
                 'position': current_row
             }
             self.delete_history.append(deleted_item)
-            
+
             # 从数据中删除
             self.favorites[self.current_folder].pop(current_row)
             # 从列表控件中删除
@@ -2065,6 +2098,9 @@ class ClipboardHistoryApp(QMainWindow):
             self.update_list_numbers(self.favorites_list)
             # 保存更改
             self.save_favorites()
+
+            if removing_synced_memory:
+                self.show_toast("已从本机移除,云端仍保留", 1500)
             
             # 如果当前收藏夹为空且不是默认收藏夹，询问是否删除该收藏夹
             if not self.favorites[self.current_folder] and self.current_folder != "默认收藏夹":
@@ -2302,11 +2338,20 @@ class ClipboardHistoryApp(QMainWindow):
 
     def _apply_loaded_favorites(self, favorites):
         """把加载到的收藏夹数据应用到界面。"""
-        self.favorites = favorites or {}
+        favorites = favorites or {}
 
-        # 「记忆」夹走出箱模式：本地只作「待发队列」，启动时清空，不载入云端已累积的记忆
-        # （那些交给安卓 app 处理）。这样本地也绝不会把旧记忆重新整包上传到云端。
-        self.favorites["记忆"] = []
+        # 「记忆」夹走出箱模式：云端只追加、不删除。这里把云端已累积的记忆加载到本机
+        # 仅用于查看，统一打上 synced 标记——它们是「已同步」的，_flush_pending_memory
+        # 会跳过，绝不会被当成本地待发项重复上传。
+        cloud_memory = favorites.get("记忆") or []
+        memory_items = []
+        for entry in cloud_memory:
+            text = entry.get("text") if isinstance(entry, dict) else str(entry)
+            if text:
+                memory_items.append({"text": text, "description": "", "synced": True})
+        favorites["记忆"] = memory_items
+
+        self.favorites = favorites
 
         # 确保至少有默认收藏夹
         if "默认收藏夹" not in self.favorites:
@@ -2368,8 +2413,8 @@ class ClipboardHistoryApp(QMainWindow):
     def save_favorites(self):
         """把收藏记录（不含「记忆」夹）异步整包保存到云端 Worker（不写本地文件）。
 
-        「记忆」夹走出箱模式：经 /append 只追加、同步成功后本地删除，故不能参与这里的
-        整包覆盖——否则本地清空后会把云端已累积的记忆一并删掉。详见 _send_to_memory。
+        「记忆」夹走出箱模式：经 /append 只追加、云端只增不减，故不能参与这里的
+        整包覆盖——否则会把云端已累积的记忆一并删掉。详见 _send_to_memory。
         """
         try:
             if not (self.d1.enabled and self.d1.has_valid_token()):
@@ -2444,7 +2489,7 @@ class ClipboardHistoryApp(QMainWindow):
                     QMessageBox.warning(self, "设置失败", f"快捷键 {new_hotkey} 注册失败，可能被其它程序占用，请更换组合。")
 
     def show_memory_hotkey_settings(self):
-        """设置普通界面复制文本并移到记忆的快捷键（模拟 Ctrl+C）"""
+        """设置「同步剪贴板到记忆」的快捷键"""
         dialog = HotkeySettingDialog(self, self.config.get('memory_hotkey', 'alt+y'))
         if dialog.exec() == QDialog.DialogCode.Accepted:
             new_hotkey = dialog.new_hotkey
@@ -2452,13 +2497,13 @@ class ClipboardHistoryApp(QMainWindow):
                 self.config['memory_hotkey'] = new_hotkey
                 self.save_config()
                 # 重新注册记忆热键
-                if self.hotkey_manager.register('memory', new_hotkey, self.move_latest_clipboard_to_memory):
-                    QMessageBox.information(self, "设置成功", f"普通界面复制到记忆快捷键已更改为: {new_hotkey}")
+                if self.hotkey_manager.register('memory', new_hotkey, self.sync_clipboard_to_memory):
+                    QMessageBox.information(self, "设置成功", f"同步剪贴板到记忆快捷键已更改为: {new_hotkey}")
                 else:
                     QMessageBox.warning(self, "设置失败", f"快捷键 {new_hotkey} 注册失败，可能被其它程序占用，请更换组合。")
 
     def show_terminal_memory_hotkey_settings(self):
-        """设置终端界面复制文本并移到记忆的快捷键（模拟鼠标右键）"""
+        """设置第二个「同步剪贴板到记忆」快捷键（终端/普通窗口通用）"""
         dialog = HotkeySettingDialog(self, self.config.get('terminal_memory_hotkey', 'alt+d'))
         if dialog.exec() == QDialog.DialogCode.Accepted:
             new_hotkey = dialog.new_hotkey
@@ -2466,8 +2511,8 @@ class ClipboardHistoryApp(QMainWindow):
                 self.config['terminal_memory_hotkey'] = new_hotkey
                 self.save_config()
                 # 重新注册终端记忆热键
-                if self.hotkey_manager.register('terminal_memory', new_hotkey, self.move_terminal_selection_to_memory):
-                    QMessageBox.information(self, "设置成功", f"终端界面复制到记忆快捷键已更改为: {new_hotkey}")
+                if self.hotkey_manager.register('terminal_memory', new_hotkey, self.sync_clipboard_to_memory):
+                    QMessageBox.information(self, "设置成功", f"终端同步剪贴板到记忆快捷键已更改为: {new_hotkey}")
                 else:
                     QMessageBox.warning(self, "设置失败", f"快捷键 {new_hotkey} 注册失败，可能被其它程序占用，请更换组合。")
 
@@ -2611,15 +2656,23 @@ class ClipboardHistoryApp(QMainWindow):
                 self.save_favorites()
 
     def show_toast(self, message, duration=2000):
-        """弹出一个短暂提示窗口，duration 毫秒后自动消失（居中于主窗口）。"""
-        if not hasattr(self, '_toast') or self._toast is None:
-            self._toast = ToastNotification(self)
-        self._toast.show_message(message, duration, anchor=self)
+        """弹出一个短暂提示窗口，duration 毫秒后自动消失（居中于主窗口）。
+
+        提示窗口只是反馈，任何异常都不应影响主流程（PyQt6 中槽内未捕获异常
+        会直接终止进程）。
+        """
+        try:
+            if not hasattr(self, '_toast') or self._toast is None:
+                self._toast = ToastNotification(self)
+            self._toast.show_message(message, duration, anchor=self)
+        except Exception as e:
+            print(f"显示提示失败: {e}")
 
     def _send_to_memory(self, text):
         """把一条文本送入「记忆」出箱：先入本地待发队列，再后台「只追加」到云端。
 
-        同步成功后本地删除这条（之后绝不会再被上传），失败则留在本地待发队列、下次重试。
+        同步成功后这条标记为 synced（继续在本机展示，但之后绝不会再被上传），
+        失败则留在本地待发队列、下次重试。
         云端只增不减，交给安卓 app 独立处理。返回 True 表示已受理（开始同步）。
         """
         MEMORY_FOLDER = "记忆"
@@ -2667,6 +2720,9 @@ class ClipboardHistoryApp(QMainWindow):
             self._append_workers = []          # 持有运行中的线程，防止被回收
 
         for item in list(self.favorites.get(MEMORY_FOLDER, [])):
+            # 云端已同步、仅用于本机展示的条目不再上传
+            if isinstance(item, dict) and item.get("synced"):
+                continue
             text = item["text"] if isinstance(item, dict) else str(item)
             if not text or text in self._memory_inflight:
                 continue
@@ -2679,7 +2735,15 @@ class ClipboardHistoryApp(QMainWindow):
             worker.start()
 
     def _on_memory_appended(self, text, ok, err):
-        """CloudAppendWorker 的回调（主线程）：成功则从本地待发队列删除该条，失败则保留。"""
+        """CloudAppendWorker 的回调（主线程）：成功则标记该条为已同步，失败则保留待发。"""
+        # PyQt6 中槽函数抛出的异常会直接终止整个进程（pythonw 下无任何提示），
+        # 所以这里必须兜住所有异常。
+        try:
+            self._handle_memory_appended(text, ok)
+        except Exception as e:
+            print(f"处理记忆同步结果出错: {e}")
+
+    def _handle_memory_appended(self, text, ok):
         MEMORY_FOLDER = "记忆"
         if hasattr(self, "_memory_inflight"):
             self._memory_inflight.discard(text)
@@ -2687,22 +2751,25 @@ class ClipboardHistoryApp(QMainWindow):
             self._append_workers = [w for w in self._append_workers if w.isRunning()]
 
         if ok:
-            # 同步成功：从本地待发队列删除这条，之后不会再被上传
+            # 同步成功：标记为已同步（继续在本机展示，但不会再被上传）
             lst = self.favorites.get(MEMORY_FOLDER, [])
             for i, item in enumerate(lst):
                 existing = item["text"] if isinstance(item, dict) else str(item)
                 if existing == text:
-                    lst.pop(i)
+                    lst[i] = {"text": text, "description": "", "synced": True}
                     break
             if self.current_folder == MEMORY_FOLDER:
                 self.change_folder(MEMORY_FOLDER)  # 刷新列表显示
-            self.show_toast("成功,记忆已同步到云端", 1500)
+            # 同步成功的文字用红色突出，其余提示文字保持白色
+            preview = escape(_short_preview(text))
+            self.show_toast(
+                f'同步 <span style="color:#ff5555;">{preview}</span> 到记忆文件夹成功', 2000)
         else:
-            # 失败：保留在本地待发队列，下次添加新记忆或重启后会重试
+            # 失败：仍留在本地待发队列，下次添加新记忆或手动上传时会重试
             self.show_toast("失败,未能同步到云端,已留在本地待重试", 2000)
 
     def move_history_to_memory(self):
-        """将历史记录中高亮选中的条目送入「记忆」出箱（同步到云端后本地自动删除）。"""
+        """将历史记录中高亮选中的条目送入「记忆」出箱（同步到云端后标记为已同步）。"""
         current_row = self.history_list.currentRow()
         if current_row < 0 or current_row >= len(self.clipboard_history):
             return
@@ -2711,7 +2778,7 @@ class ClipboardHistoryApp(QMainWindow):
         self._send_to_memory(text)
 
     def upload_selected_memory_to_cloud(self):
-        """在「记忆」收藏夹面板：将高亮选中的条目上传到云端（同步成功后本地自动删除）。
+        """在「记忆」收藏夹面板：将高亮选中的待发条目上传到云端（成功后标记为已同步）。
 
         与历史面板的 Alt+J 一致，只是这里条目本就在「记忆」待发队列中，直接复用
         _flush_pending_memory 把选中的这一条「只追加」到云端。
@@ -2730,6 +2797,9 @@ class ClipboardHistoryApp(QMainWindow):
             return
 
         item = items[current_row]
+        if isinstance(item, dict) and item.get("synced"):
+            self.show_toast("该条已在云端,无需重复上传", 1500)
+            return
         text = item["text"] if isinstance(item, dict) else str(item)
         if not text:
             return
@@ -2737,107 +2807,28 @@ class ClipboardHistoryApp(QMainWindow):
         self.show_toast("正在同步记忆到云端…", 1000)
         self._flush_pending_memory(only_text=text)
 
-    def move_latest_clipboard_to_memory(self):
-        """全局热键(Alt+Y)回调：模拟 Ctrl+C 复制当前选中的文字，并存入「记忆」收藏夹。
+    def sync_clipboard_to_memory(self):
+        """全局热键回调：把剪贴板里最新的一条内容同步到「记忆」收藏夹。
 
-        任何窗口下均可用，不依赖应用是否聚焦/可见。流程：
-        1. 清空剪贴板，用于之后判断 Ctrl+C 是否真的复制到了内容；
-        2. 轮询等键盘上所有按键松开（Alt+Y 触发时按键仍被按住，立即发 Ctrl+C 会被当成组合键而失败）；
-        3. 用 pynput 模拟 Ctrl+C，再用 QTimer 让出事件循环，等目标程序写入剪贴板后读取。
-        成功 / 无选中 / 失败 均弹出持续 1 秒的提示。
-
-        注意：要让 Ctrl+C 作用于以管理员身份运行的程序(如 Cursor)，本程序也须提权，
-        否则会被 Windows 的 UIPI 机制拦截——启动时的 ensure_admin() 已处理。
+        使用方式：先自己 Ctrl+C 复制文本，再按本快捷键。热键本身只读取剪贴板，
+        不再模拟 Ctrl+C / 鼠标右键，也不清空剪贴板——这样不会和当前程序抢剪贴板，
+        也不会因模拟输入而崩溃。
         """
-        try:
-            # 清空剪贴板：若随后 Ctrl+C 没复制到内容，剪贴板仍为空 → 判定没有选中文字
-            self.clipboard.clear()
-
-            # 关键：Alt+Y 触发时按键仍被物理按住，此刻发 Ctrl+C 会被当成组合键而失败。
-            # 必须先等键盘上所有按键都松开，再模拟 Ctrl+C。
-            self._mem_wait_count = 0
-            self._wait_modifiers_up_then_copy()
-        except Exception as e:
-            self.show_toast(f"失败,{e}", 1000)
-
-    def _wait_modifiers_up_then_copy(self):
-        """轮询等待键盘上所有按键松开后，再模拟 Ctrl+C（最多等约 1.5 秒）。"""
-        self._mem_wait_count += 1
-        if _any_key_down() and self._mem_wait_count < 75:  # 75 * 20ms ≈ 1.5s 超时保护
-            QTimer.singleShot(20, self._wait_modifiers_up_then_copy)
-            return
-        self._do_copy_for_memory()
-
-    def _do_copy_for_memory(self):
-        """模拟 Ctrl+C，再让出事件循环等目标程序写入剪贴板后读取。"""
-        try:
-            # 用 pynput（虚拟键码）模拟 Ctrl+C，比 keyboard 库的扫描码兼容性更好
-            kb = Controller()
-            kb.press(Key.ctrl)
-            kb.press('c')
-            kb.release('c')
-            kb.release(Key.ctrl)
-            QTimer.singleShot(250, self._save_selection_to_memory)
-        except Exception as e:
-            self.show_toast(f"失败,{e}", 1000)
-
-    def _save_selection_to_memory(self):
-        """move_latest_clipboard_to_memory 的延迟回调：读取 Ctrl+C 复制到的选中文字并送入记忆出箱。"""
         try:
             text = self.clipboard.text()
-            win_text = _win_clipboard_text()
 
-            # Qt 偶尔读不到他进程刚写入的内容，用 Windows API 的结果兜底
-            if not text and win_text:
-                text = win_text
-
-            # 剪贴板被清空后仍为空，说明 Ctrl+C 没复制到东西，即没有选中文字
+            # Qt 偶尔读不到其它进程写入的内容，用 Windows API 兜底
             if not text:
-                self.show_toast("没有选中的文字", 1000)
+                text = _win_clipboard_text() or ""
+
+            if not text or not text.strip():
+                self.show_toast("剪贴板为空,请先复制文本", 1500)
                 return
 
-            # 送入「记忆」出箱：同步到云端后本地自动删除，提示由 _send_to_memory 处理
+            # 送入「记忆」出箱：同步完成后标记为已同步，提示由 _send_to_memory 处理
             self._send_to_memory(text)
         except Exception as e:
-            self.show_toast(f"失败,{e}", 1000)
-
-    def move_terminal_selection_to_memory(self):
-        """全局热键(Alt+D)回调：模拟鼠标右键点击复制终端选中内容，并存入「记忆」收藏夹。
-
-        终端(开启快速编辑模式的控制台)里 Ctrl+C 是“中断”而非“复制”，但选中文字后
-        右键点击会把选中内容复制到剪贴板。流程与 Alt+Y 一致，只是把模拟 Ctrl+C 换成
-        在鼠标当前位置模拟一次右键单击。
-        """
-        try:
-            # 清空剪贴板：若右键点击没复制到内容，剪贴板仍为空 → 判定没有选中文字
-            self.clipboard.clear()
-
-            # Alt+D 触发时按键仍被物理按住，先等所有按键松开再模拟右键
-            self._mem_wait_count = 0
-            self._wait_keys_up_then_right_click()
-        except Exception as e:
-            self.show_toast(f"失败,{e}", 1000)
-
-    def _wait_keys_up_then_right_click(self):
-        """轮询等待键盘上所有按键松开后，再模拟鼠标右键点击（最多等约 1.5 秒）。"""
-        self._mem_wait_count += 1
-        if _any_key_down() and self._mem_wait_count < 75:  # 75 * 20ms ≈ 1.5s 超时保护
-            QTimer.singleShot(20, self._wait_keys_up_then_right_click)
-            return
-        self._do_right_click_for_memory()
-
-    def _do_right_click_for_memory(self):
-        """在鼠标当前位置模拟一次右键单击，再让出事件循环等剪贴板更新后读取。"""
-        try:
-            MOUSEEVENTF_RIGHTDOWN = 0x0008
-            MOUSEEVENTF_RIGHTUP = 0x0010
-            u = ctypes.windll.user32
-            u.mouse_event(MOUSEEVENTF_RIGHTDOWN, 0, 0, 0, 0)
-            u.mouse_event(MOUSEEVENTF_RIGHTUP, 0, 0, 0, 0)
-            # 复用 Alt+Y 的读取/保存逻辑
-            QTimer.singleShot(250, self._save_selection_to_memory)
-        except Exception as e:
-            self.show_toast(f"失败,{e}", 1000)
+            self.show_toast(f"失败,{e}", 1500)
 
     def change_folder(self, folder_name):
         """切换当前收藏夹"""
@@ -3233,6 +3224,15 @@ def ensure_admin():
 
 
 def main():
+    # pythonw 启动时没有控制台，把崩溃堆栈写入 crash.log，便于排查闪退
+    try:
+        import faulthandler
+        _crash_log = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'crash.log'),
+                          'a', encoding='utf-8')
+        faulthandler.enable(file=_crash_log, all_threads=True)
+    except Exception:
+        pass
+
     # 先尝试以管理员身份运行，确保模拟按键能作用于管理员程序
     ensure_admin()
 

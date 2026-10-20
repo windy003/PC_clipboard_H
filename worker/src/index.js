@@ -281,15 +281,31 @@ async function listFolders(db, userId) {
   return (res.results || []).map((r) => ({ name: r.name, count: r.count || 0 }));
 }
 
+/** 只增不减的「记忆」夹：保存其它收藏夹时绝不能被清掉。 */
+const MEMORY_FOLDER = "记忆";
+
 async function saveFavorites(db, userId, favorites) {
   await ensureSchema(db);
 
+  // 「记忆」夹：客户端用 /append 只追加、在线端消费后删除，不参与整包覆盖。
+  // 因此这里的全量 DELETE 必须排除它，否则每次保存其它收藏夹都会把
+  // 云端尚未被安卓端取走的记忆一并抹掉（数据丢失）。
+  const memoryRow = await db
+    .prepare("SELECT name FROM folders WHERE user_id = ? AND name = ?")
+    .bind(userId, MEMORY_FOLDER)
+    .first();
+
   const stmts = [
-    db.prepare("DELETE FROM favorites WHERE user_id = ?").bind(userId),
-    db.prepare("DELETE FROM folders WHERE user_id = ?").bind(userId),
+    db
+      .prepare("DELETE FROM favorites WHERE user_id = ? AND folder <> ?")
+      .bind(userId, MEMORY_FOLDER),
+    db
+      .prepare("DELETE FROM folders WHERE user_id = ? AND name <> ?")
+      .bind(userId, MEMORY_FOLDER),
   ];
 
-  const folderNames = Object.keys(favorites);
+  // 即使客户端误传了「记忆」，也忽略它，避免整包覆盖把线上记忆改成旧快照
+  const folderNames = Object.keys(favorites).filter((name) => name !== MEMORY_FOLDER);
   folderNames.forEach((name, pos) => {
     stmts.push(
       db
@@ -318,6 +334,15 @@ async function saveFavorites(db, userId, favorites) {
           .bind(userId, folder, text, desc, pos)
       );
     });
+  }
+
+  // 保留下来的「记忆」夹排到末尾，与 /append 新建收藏夹时的顺序一致
+  if (memoryRow) {
+    stmts.push(
+      db
+        .prepare("UPDATE folders SET position = ? WHERE user_id = ? AND name = ?")
+        .bind(folderNames.length, userId, MEMORY_FOLDER)
+    );
   }
 
   await db.batch(stmts);

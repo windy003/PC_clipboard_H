@@ -4,6 +4,7 @@ dist
 .clipboard_history.json
 .clipboard_favorites.json
 .clipboard_token.json
+crash.log
 worker/.dev.vars.example
 Android_App/app/build
 Android_App/.gradle
